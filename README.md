@@ -18,20 +18,35 @@
 - ✅ [jingshouyan/academic-integrity-geng](https://github.com/jingshouyan/academic-integrity-geng) 五维审查体系
 
 ### 🔧 技术特性
+- 📁 **目录级综合审查**：传入论文目录，自动识别PDF/Word/Excel/补充材料/原始数据，跨文件交叉验证
 - 📝 **MinerU PDF解析**：支持原生PDF/扫描件/图片PDF转Markdown，保留表格、公式、图片标注
 - 📚 **长论文冗余审查**：智能分块（8000字符/块+1000字符重叠）+ 多块结果合并，无信息丢失
 - ⚡ **双引擎检测**：本地统计检测（无API调用）+ LLM语义分析（Mimo模型）
 - 📊 **结构化输出**：美观的Markdown报告 + 原始JSON结果导出
 - 🔒 **隐私友好**：本地文件可选免Token的MinerU Agent API，无需上传到第三方训练集
+- 🧠 **社区驱动知识库**：内置12+种从PubPeer典型案例汇总的造假检测模式，支持社区贡献自动更新
 
 ---
 
 ## 🚀 快速开始
 ### 1. 安装依赖
 ```bash
-# 仅标准库，无额外依赖！
-python >= 3.10
+pip install -r requirements.txt
 ```
+
+<details>
+<summary>📋 依赖详情</summary>
+
+| 依赖 | 用途 | 必需 |
+|------|------|------|
+| Python ≥ 3.10 | 运行环境 | ✅ 必需 |
+| python-docx ≥ 0.8.11 | 读取Word文档(.docx) | 📁 目录审查时需要 |
+| openpyxl ≥ 3.1.0 | 读取Excel表格(.xlsx/.xlsm) | 📁 目录审查时需要 |
+| lxml ≥ 4.9.0 | python-docx的XML解析依赖 | 📁 目录审查时需要 |
+
+> 💡 纯PDF审查仅需Python标准库，无额外依赖。目录级多格式审查需安装上述可选依赖。
+
+</details>
 
 ### 2. 配置API Key
 本工具支持所有**OpenAI兼容LLM**（OpenAI/DeepSeek/通义千问/豆包/Ollama本地部署等），采用外部配置文件避免泄露密钥：
@@ -66,7 +81,10 @@ MINERU_TOKEN = "你的MinerU Token（可选）"
 
 ### 3. 运行检测
 ```bash
-# 推荐：MinerU解析 + 完整检测
+# 🆕 新功能：审查整个论文项目目录（自动识别主论文/补充材料/原始数据/表格，跨文件交叉验证）
+python paper_audit.py ./my_paper_project/ --mineru
+
+# 推荐：单个PDF文件MinerU解析 + 完整检测
 python paper_audit.py your_paper.pdf --mineru
 
 # 仅原始PDF文本提取 + 检测
@@ -74,7 +92,18 @@ python paper_audit.py your_paper.pdf
 
 # 自定义输出
 python paper_audit.py your_paper.pdf --mineru -o report.md --json
+
+# 更新欺诈模式知识库（从PubPeer评论/造假案例文本中提取新检测模式）
+python paper_audit.py --update-patterns pubpeer_comments.txt
 ```
+
+---
+
+## 🤝 社区贡献知识库
+本工具内置的欺诈模式知识库基于PubPeer公开案例和社区贡献构建，欢迎所有人参与共建：
+1. 收集PubPeer上的公开造假案例评论/描述，保存为纯文本文件
+2. 运行`--update-patterns`命令自动提取新的检测模式
+3. 提交PR到本仓库，审核通过后会合并到公共知识库，所有人都能受益
 
 ---
 
@@ -87,7 +116,7 @@ usage: paper_audit.py [-h] [--mineru]
                       pdf_path
 
 positional arguments:
-  pdf_path              待审查的PDF文件路径
+  pdf_path              待审查的文件路径或论文目录路径（支持PDF/Word/Excel/Supplement等）
 
 options:
   -h, --help            show this help message and exit
@@ -137,16 +166,24 @@ options:
 ## 🧠 工作原理
 ```mermaid
 graph TD
-    A["输入PDF"] --> B{"MinerU解析?"}
-    B -->|是| C["MinerU API转Markdown"]
-    B -->|否| D["本地PDF文本提取"]
-    C --> E["全文文本"]
-    D --> E
-    E --> F["本地统计检测"]
-    F --> G["智能分块: 8000字符/块, 1000重叠"]
-    G --> H["逐块LLM语义审查"]
-    H --> I["多块结果合并: 去重+风险升级"]
-    I --> J["输出Markdown报告 + JSON结果"]
+    A["输入路径"] --> B{"文件/目录?"}
+    B -->|目录| C["递归扫描目录 → 自动分类所有文件"]
+    C --> D["多格式文本提取(PDF/Word/Excel/CSV)"]
+    D --> E["合并所有文件文本(带文件来源标注)"]
+    B -->|单文件| F{"文件类型?"}
+    F -->|PDF| G{"MinerU解析?"}
+    G -->|是| H["MinerU API转Markdown"]
+    G -->|否| I["本地PDF文本提取"]
+    F -->|Word/Excel/CSV| J["对应格式文本提取"]
+    H --> K["全文文本"]
+    I --> K
+    J --> K
+    E --> K
+    K --> L["本地统计检测"]
+    L --> M["智能分块: 8000字符/块, 1000重叠"]
+    M --> N["逐块LLM语义审查"]
+    N --> O["多块结果合并: 去重+风险升级"]
+    O --> P["输出Markdown报告 + JSON结果"]
 ```
 
 ---
@@ -156,6 +193,8 @@ graph TD
 - [wooly99/geng-academic-fraud-detector](https://github.com/wooly99/geng-academic-fraud-detector) - 耿同学六式检测框架
 - [Neospecies/AcademicIntegrityHunter](https://github.com/Neospecies/AcademicIntegrityHunter) - 本地统计检测算法
 - [jingshouyan/academic-integrity-geng](https://github.com/jingshouyan/academic-integrity-geng) - 五维审查体系
+
+感谢 [LINUX DO 社区](https://linux.do/) 提供的技术交流与支持。
 
 ---
 
