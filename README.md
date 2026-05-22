@@ -128,6 +128,14 @@ I --> J[输出Markdown报告 + JSON结果]
 
 ---
 
+## 🙏 鸣谢
+本项目检测体系融合参考以下优秀开源项目：
+- [wooly99/geng-academic-fraud-detector](https://github.com/wooly99/geng-academic-fraud-detector) - 耿同学六式检测框架
+- [Neospecies/AcademicIntegrityHunter](https://github.com/Neospecies/AcademicIntegrityHunter) - 本地统计检测算法
+- [jingshouyan/academic-integrity-geng](https://github.com/jingshouyan/academic-integrity-geng) - 五维审查体系
+
+---
+
 ## ⚠️ 免责声明
 本工具仅供学术研究使用，所有检测结果仅为参考，不构成任何学术不端的判定依据。请严格遵守相关法律法规和学术规范，禁止将本工具用于任何非法用途。
 
