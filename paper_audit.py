@@ -19,8 +19,8 @@ import importlib
 try:
     config = importlib.import_module("config")
     LLM_API_KEY = getattr(config, "LLM_API_KEY", "")
-    LLM_API_URL = getattr(config, "LLM_API_URL", "https://fufu.iqach.top/v1/chat/completions")
-    LLM_MODEL = getattr(config, "LLM_MODEL", "mimo-v2.5-pro")
+    LLM_API_URL = getattr(config, "LLM_API_URL", "https://api.openai.com/v1/chat/completions")
+    LLM_MODEL = getattr(config, "LLM_MODEL", "gpt-3.5-turbo")
     MINERU_TOKEN = getattr(config, "MINERU_TOKEN", "")
 except ImportError:
     # 未找到config.py使用默认OpenAI兼容配置，按实际使用修改
