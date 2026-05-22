@@ -137,16 +137,16 @@ options:
 ## 🧠 工作原理
 ```mermaid
 graph TD
-A[输入PDF] --> B{MinerU解析?}
-B -->|是| C[MinerU API转Markdown]
-B -->|否| D[本地PDF文本提取]
-C --> E[全文文本]
-D --> E
-E --> F[本地统计检测]
-F --> G[智能分块(8000字符/块 + 1000重叠)]
-G --> H[逐块LLM语义审查]
-H --> I[多块结果合并(去重+风险升级)]
-I --> J[输出Markdown报告 + JSON结果]
+    A["输入PDF"] --> B{"MinerU解析?"}
+    B -->|是| C["MinerU API转Markdown"]
+    B -->|否| D["本地PDF文本提取"]
+    C --> E["全文文本"]
+    D --> E
+    E --> F["本地统计检测"]
+    F --> G["智能分块: 8000字符/块, 1000重叠"]
+    G --> H["逐块LLM语义审查"]
+    H --> I["多块结果合并: 去重+风险升级"]
+    I --> J["输出Markdown报告 + JSON结果"]
 ```
 
 ---
