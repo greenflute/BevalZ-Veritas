@@ -2209,6 +2209,81 @@ def normalize_run_meta(meta, input_path=None, full_text=None):
     return normalized
 
 
+def extract_paper_identity(full_text: str, input_path: Path = None) -> Dict[str, Any]:
+    """Best-effort paper identity extraction for follow-up drafts."""
+    raw_text = _clean_mineru_table_block(full_text or "")
+    lines = []
+    for line in raw_text.splitlines():
+        cleaned = re.sub(r"\s+", " ", str(line or "")).strip()
+        if cleaned:
+            lines.append(cleaned)
+    top_lines = lines[:40]
+
+    def score_title(line: str) -> float:
+        lowered = line.lower()
+        if len(line) < 12 or len(line) > 220:
+            return -100.0
+        if any(term in lowered for term in ("abstract", "keyword", "keywords", "introduction", "references", "reference")):
+            return -100.0
+        score = 0.0
+        score += min(len(line) / 24.0, 8.0)
+        if re.search(r"[A-Za-z]", line):
+            score += 2.0
+        if re.search(r"[.!?]$", line):
+            score -= 1.5
+        if "@" in line or re.search(r"\b(?:department|university|institute|hospital)\b", lowered):
+            score -= 2.0
+        if re.search(r"\b(?:doi|vol\.?|volume|issue|pages?|pp\.?|journal|nature|science|cell|bmc|plos|springer|elsevier|wiley|frontiers)\b", lowered):
+            score -= 1.0
+        if re.search(r"\b[A-Z]\.\s*[A-Z]\.", line):
+            score -= 2.5
+        if line.count(",") >= 3:
+            score -= 1.5
+        return score
+
+    def looks_like_author_line(line: str) -> bool:
+        lowered = line.lower()
+        if len(line) > 180:
+            return False
+        if any(term in lowered for term in ("abstract", "keyword", "keywords", "introduction", "references")):
+            return False
+        return bool(
+            re.search(r"\b[A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+)+\b", line)
+            or re.search(r"\bet al\.?\b", lowered)
+            or line.count(",") >= 2
+            or " and " in lowered
+        )
+
+    def looks_like_journal(line: str) -> bool:
+        lowered = line.lower()
+        return bool(re.search(r"\b(?:journal|nature|science|cell|lancet|bmc|plos|springer|elsevier|wiley|frontiers|ieee|acm|proceedings)\b", lowered))
+
+    title = max(top_lines, key=score_title, default="")
+    if title and score_title(title) < 0:
+        title = ""
+    authors = []
+    journal = ""
+    for idx, line in enumerate(top_lines):
+        if not journal and looks_like_journal(line):
+            journal = line
+        if not authors and looks_like_author_line(line) and line != title:
+            authors = [part.strip() for part in re.split(r",|;| and ", line) if part.strip()]
+        if title and authors and journal:
+            break
+    if not title and input_path is not None:
+        try:
+            title = Path(input_path).stem.replace("_", " ").replace("-", " ").strip()
+        except Exception:
+            title = ""
+    if authors:
+        authors = authors[:6]
+    return {
+        "title": title,
+        "journal": journal,
+        "authors": authors,
+    }
+
+
 def extract_text_from_file(file_path: Path, max_chars_per_file=None, use_mineru=False, mineru_lang="ch", output_dir=None) -> str:
     """从任意支持的文件类型中提取文本
 
@@ -2510,8 +2585,31 @@ def call_llm_messages(messages, temperature=0.2, timeout=None, max_tokens=1800):
     return result["choices"][0]["message"]["content"]
 
 
-def build_followup_prompt(kind, context):
+def normalize_followup_language(language):
+    value = str(language or "zh").strip().lower()
+    if value in {"en", "english"}:
+        return "en"
+    if value in {"zh", "cn", "chinese", "中文"}:
+        return "zh"
+    return "zh"
+
+
+def _followup_language_instruction(language):
+    language = normalize_followup_language(language)
+    if language == "en":
+        return (
+            "Write the entire draft in English. "
+            "Use the phrase 'Based on my reading and understanding of this article' or a close equivalent."
+        )
+    return (
+        "请使用简体中文撰写全文。"
+        "请明确写出“基于对这篇文章的阅读和理解，我注意到以下问题”或语义等价表述。"
+    )
+
+
+def build_followup_prompt(kind, context, language="zh"):
     context = context if isinstance(context, dict) else {}
+    language = normalize_followup_language(language)
     kind_labels = {
         "pubpeer_comment": "PubPeer comment",
         "journal_letter": "letter to the journal editor",
@@ -2519,19 +2617,28 @@ def build_followup_prompt(kind, context):
     if kind not in kind_labels:
         raise ValueError(f"unsupported action kind: {kind}")
     context_text = json.dumps(context, ensure_ascii=False, indent=2)
+    identity_instruction = (
+        "Use the article identity fields in the Audit context JSON when available: paper_identity.title, "
+        "paper_identity.journal, and paper_identity.authors. Match the article title, journal name, and author "
+        "information accurately; do not invent missing title, journal, DOI, or author details. "
+        "If an identity field is missing, say it is not available in the audit context instead of guessing. "
+        + _followup_language_instruction(language)
+    )
     if kind == "pubpeer_comment":
         task = (
             "Draft a concise PubPeer comment based strictly on the audit context. "
-            "Use the main language of the paper/evidence. Be neutral, evidence-based, and non-defamatory. "
+            f"{identity_instruction} "
+            "Be neutral, evidence-based, and non-defamatory. "
             "Do not claim fraud or misconduct as fact. Ask clear questions and cite only the evidence in context. "
-            "Include a short title and 3-6 numbered concerns if warranted."
+            "Include a short title, an article identification sentence, and 3-6 numbered concerns if warranted."
         )
     else:
         task = (
             "Draft a formal letter to the journal editor based strictly on the audit context. "
-            "Use the main language of the paper/evidence. Keep a professional, cautious tone. "
+            f"{identity_instruction} "
+            "Keep a professional, cautious tone. "
             "Do not assert fraud or misconduct as fact. Request editorial assessment and list reproducible concerns. "
-            "Include subject, salutation, concise background, bullet concerns, requested actions, and closing."
+            "Include subject, salutation, concise background, article identification, bullet concerns, requested actions, and closing."
         )
     return [
         {
@@ -2548,8 +2655,8 @@ def build_followup_prompt(kind, context):
     ]
 
 
-def generate_followup_draft(kind, context, timeout=None):
-    messages = build_followup_prompt(kind, context)
+def generate_followup_draft(kind, context, language="zh", timeout=None):
+    messages = build_followup_prompt(kind, context, language=language)
     return call_llm_messages(messages, temperature=0.15, timeout=timeout, max_tokens=2200)
 
 
@@ -2670,8 +2777,9 @@ def serve_report_actions(host="127.0.0.1", port=8765):
                 payload = json.loads(body or "{}")
                 kind = payload.get("kind")
                 context = payload.get("context") or {}
-                text = generate_followup_draft(kind, context, timeout=LLM_TIMEOUT)
-                self._send_json({"ok": True, "kind": kind, "model": LLM_MODEL, "text": text})
+                language = normalize_followup_language(payload.get("language"))
+                text = generate_followup_draft(kind, context, language=language, timeout=LLM_TIMEOUT)
+                self._send_json({"ok": True, "kind": kind, "language": language, "model": LLM_MODEL, "text": text})
             except Exception as e:
                 self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
 
@@ -5115,6 +5223,8 @@ def format_audit_action_summary_html(report, meta, stat_result):
 
 
 def _report_action_context(report, pdf_path, meta, stat_result):
+    meta = meta or {}
+    paper_identity = meta.get("paper_identity") or {}
     checks = sorted(report.get("checks", []) if isinstance(report, dict) else [], key=_check_sort_key)
     suspicious = [c for c in checks if _is_suspicious_check(c)]
     selected = suspicious[:10] if suspicious else checks[:8]
@@ -5159,6 +5269,15 @@ def _report_action_context(report, pdf_path, meta, stat_result):
         })
     return {
         "paper": str(pdf_path),
+        "paper_identity": {
+            "title": _brief_text(paper_identity.get("title", ""), 300),
+            "journal": _brief_text(paper_identity.get("journal", ""), 220),
+            "authors": [
+                _brief_text(author, 120)
+                for author in (paper_identity.get("authors") or [])
+                if str(author or "").strip()
+            ][:8],
+        },
         "summary": _brief_text(report.get("summary", ""), 1200) if isinstance(report, dict) else "",
         "risk_level": report.get("risk_level", "") if isinstance(report, dict) else "",
         "detection_score": report.get("detection_score", "") if isinstance(report, dict) else "",
@@ -5198,8 +5317,12 @@ def format_web_action_panel_html(report, pdf_path, meta, stat_result):
     return f"""
   <div class="section web-action-section">
     <h2>一键生成后续沟通草稿</h2>
-    <p class="section-hint">草稿由本地配置的LLM生成，语言会按文献/证据主语言自动匹配，生成后仍需人工核对证据和措辞。</p>
+    <p class="section-hint">草稿由本地配置的LLM生成，生成后仍需人工核对证据和措辞。</p>
     <div class="web-action-toolbar">
+      <select id="draft-language" class="draft-language-select" aria-label="草稿语言">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
       <button type="button" class="action-button" data-action-kind="pubpeer_comment">生成 PubPeer Comment</button>
       <button type="button" class="action-button" data-action-kind="journal_letter">生成期刊 Letter</button>
       <button type="button" class="secondary-button" id="copy-generated-draft">复制草稿</button>
@@ -5213,10 +5336,12 @@ def format_web_action_panel_html(report, pdf_path, meta, stat_result):
     const statusEl = document.getElementById('web-action-status');
     const outputEl = document.getElementById('generated-draft');
     const contextEl = document.getElementById('paper-audit-action-context');
+    const languageEl = document.getElementById('draft-language');
     const actionLabels = {{
       pubpeer_comment: 'PubPeer comment',
       journal_letter: 'journal letter'
     }};
+    const languageLabels = {{ zh: '中文', en: 'English' }};
     const generateUrl = {generate_url_json};
     function setStatus(text, isError) {{
       statusEl.textContent = text;
@@ -5226,13 +5351,14 @@ def format_web_action_panel_html(report, pdf_path, meta, stat_result):
       let context = {{}};
       try {{ context = JSON.parse(contextEl.textContent || '{{}}'); }}
       catch (err) {{ setStatus('无法读取报告上下文: ' + err.message, true); return; }}
-      setStatus('正在生成 ' + actionLabels[kind] + ' ...', false);
+      const language = (languageEl && languageEl.value) || 'zh';
+      setStatus('正在生成 ' + languageLabels[language] + ' ' + actionLabels[kind] + ' ...', false);
       outputEl.value = '';
       try {{
         const resp = await fetch(generateUrl, {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ kind, context }})
+          body: JSON.stringify({{ kind, context, language }})
         }});
         const data = await resp.json();
         if (!resp.ok || !data.ok) {{
@@ -6023,6 +6149,14 @@ def format_html_report(report, pdf_path, meta, stat_result):
     background: #2563eb;
     border-color: #2563eb;
     color: #ffffff;
+  }}
+  .draft-language-select {{
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: var(--text-main);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-weight: 800;
   }}
   .action-button:hover, .secondary-button:hover {{
     filter: brightness(0.96);
@@ -7983,6 +8117,7 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
 
     meta = normalize_run_meta(meta, input_path, full_text)
     meta["runtime"] = run_runtime
+    meta["paper_identity"] = extract_paper_identity(full_text, input_path)
     meta["preflight_results"] = preflight_results
     completed_stages.append("stage1_text_extraction")
 

@@ -2725,6 +2725,8 @@ def test_format_html_report_sorts_checks_and_uses_collapsible_details():
     assert "[[TABLE_START" not in rendered
     assert "生成 PubPeer Comment" in rendered
     assert "生成期刊 Letter" in rendered
+    assert 'id="draft-language"' in rendered
+    assert "English" in rendered
     assert "paper-audit-action-context" in rendered
     assert "127.0.0.1:8765" in rendered
     assert "--serve-report-actions" not in rendered
@@ -2846,13 +2848,61 @@ def test_report_action_context_cleans_reference_issue_text():
     assert "[[BLOCK" not in text
 
 
-def test_build_followup_prompt_uses_requested_kind_and_context():
-    context = {"summary": "发现一个疑点", "top_issues": [{"item": "p值", "reason": "p值异常"}]}
+def test_report_action_context_includes_paper_identity():
+    context = paper_audit._report_action_context(
+        {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"},
+        "paper.pdf",
+        {
+            "paper_identity": {
+                "title": "A precise article title",
+                "journal": "Journal of Reproducible Checks",
+                "authors": ["Alice Zhang", "Bob Smith"],
+            }
+        },
+        {"number_count": 0},
+    )
 
-    pubpeer_messages = paper_audit.build_followup_prompt("pubpeer_comment", context)
-    letter_messages = paper_audit.build_followup_prompt("journal_letter", context)
+    assert context["paper_identity"]["title"] == "A precise article title"
+    assert context["paper_identity"]["journal"] == "Journal of Reproducible Checks"
+    assert context["paper_identity"]["authors"] == ["Alice Zhang", "Bob Smith"]
+
+
+def test_extract_paper_identity_uses_front_matter():
+    text = """
+    A precise article title about reproducible biomarkers
+    Alice Zhang, Bob Smith, Carol Li
+    Journal of Reproducible Checks
+
+    Abstract
+    This paper reports results.
+    """
+
+    identity = paper_audit.extract_paper_identity(text)
+
+    assert identity["title"] == "A precise article title about reproducible biomarkers"
+    assert identity["journal"] == "Journal of Reproducible Checks"
+    assert identity["authors"][:2] == ["Alice Zhang", "Bob Smith"]
+
+
+def test_build_followup_prompt_uses_requested_kind_and_context():
+    context = {
+        "paper_identity": {
+            "title": "A precise article title",
+            "journal": "Journal X",
+            "authors": ["Alice Zhang"],
+        },
+        "summary": "发现一个疑点",
+        "top_issues": [{"item": "p值", "reason": "p值异常"}],
+    }
+
+    pubpeer_messages = paper_audit.build_followup_prompt("pubpeer_comment", context, language="zh")
+    letter_messages = paper_audit.build_followup_prompt("journal_letter", context, language="en")
 
     assert "PubPeer comment" in pubpeer_messages[1]["content"]
     assert "letter to the journal editor" in letter_messages[1]["content"]
-    assert "Use the main language" in pubpeer_messages[1]["content"]
+    assert "请使用简体中文" in pubpeer_messages[1]["content"]
+    assert "Based on my reading and understanding of this article" in letter_messages[1]["content"]
+    assert "paper_identity.title" in pubpeer_messages[1]["content"]
+    assert "journal name" in pubpeer_messages[1]["content"]
+    assert "author information" in pubpeer_messages[1]["content"]
     assert "发现一个疑点" in pubpeer_messages[1]["content"]
