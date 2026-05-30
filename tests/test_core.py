@@ -1409,6 +1409,49 @@ def test_build_image_audit_uses_semantic_cache(monkeypatch, tmp_path):
     assert calls["count"] == 1
 
 
+def test_build_image_audit_flushes_semantic_cache_after_each_success(monkeypatch, tmp_path):
+    first_image = tmp_path / "a.png"
+    second_image = tmp_path / "b.png"
+    for image_path in (first_image, second_image):
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * (paper_audit.MIN_IMAGE_BYTES + 10))
+
+    monkeypatch.setattr(paper_audit, "collect_image_files", lambda *args, **kwargs: [str(first_image), str(second_image)])
+    monkeypatch.setattr(paper_audit, "analyze_image_reasonability", lambda path: {
+        "path": path,
+        "file": Path(path).name,
+        "risk": "local_ok",
+        "issues": [],
+        "width": 200,
+        "height": 100,
+    })
+    cache = {}
+    flushed = []
+
+    def fake_semantic(path, timeout=45):
+        if Path(path).name == "b.png":
+            raise KeyboardInterrupt("stop after first image")
+        return {"status": "ok", "summary": "first image", "reasonability": "合理", "risks": [], "confidence": 0.8}
+
+    monkeypatch.setattr(paper_audit, "call_glm_image_semantics", fake_semantic)
+
+    try:
+        paper_audit.build_image_audit(
+            str(tmp_path),
+            limit=2,
+            semantic=True,
+            semantic_cache=cache,
+            semantic_cache_save=lambda: flushed.append(json.loads(json.dumps(cache))),
+            detector=False,
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("expected interrupted semantic image audit")
+
+    assert len(flushed) == 1
+    assert any(value.get("summary") == "first image" for value in flushed[0].values())
+
+
 def test_build_image_audit_uses_detector_cache(monkeypatch, tmp_path):
     image_path = tmp_path / "figure.png"
     image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * (paper_audit.MIN_IMAGE_BYTES + 10))
@@ -1444,6 +1487,49 @@ def test_build_image_audit_uses_detector_cache(monkeypatch, tmp_path):
     assert first["detector_checked"] == 1
     assert second["images"][0]["detector"]["score"] == 12.0
     assert calls["count"] == 1
+
+
+def test_build_image_audit_flushes_detector_cache_after_each_success(monkeypatch, tmp_path):
+    first_image = tmp_path / "a.png"
+    second_image = tmp_path / "b.png"
+    for image_path in (first_image, second_image):
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * (paper_audit.MIN_IMAGE_BYTES + 10))
+
+    monkeypatch.setattr(paper_audit, "collect_image_files", lambda *args, **kwargs: [str(first_image), str(second_image)])
+    monkeypatch.setattr(paper_audit, "analyze_image_reasonability", lambda path: {
+        "path": path,
+        "file": Path(path).name,
+        "risk": "local_ok",
+        "issues": [],
+        "width": 240,
+        "height": 160,
+    })
+    cache = {}
+    flushed = []
+
+    def fake_detector(path, timeout=60):
+        if Path(path).name == "b.png":
+            raise KeyboardInterrupt("stop after first image")
+        return {"status": "ok", "score": 9.0, "label": "真实/人工", "provider": "imagedetector.com"}
+
+    monkeypatch.setattr(paper_audit, "call_imagedetector", fake_detector)
+
+    try:
+        paper_audit.build_image_audit(
+            str(tmp_path),
+            limit=2,
+            semantic=False,
+            detector=True,
+            detector_cache=cache,
+            detector_cache_save=lambda: flushed.append(json.loads(json.dumps(cache))),
+        )
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("expected interrupted imagedetector audit")
+
+    assert len(flushed) == 1
+    assert any(value.get("score") == 9.0 for value in flushed[0].values())
 
 
 def test_alarm_timeout_bounds_image_capability_calls():

@@ -7276,6 +7276,15 @@ def _image_detector_priority_key(item):
     )
 
 
+def _flush_image_cache(cache_save, label):
+    if not callable(cache_save):
+        return
+    try:
+        cache_save()
+    except Exception as e:
+        print(f"⚠️ {label}断点缓存即时保存失败: {e}")
+
+
 def build_image_audit(
     input_path: str,
     output_dir=None,
@@ -7284,10 +7293,12 @@ def build_image_audit(
     semantic_limit=None,
     semantic_timeout=45,
     semantic_cache=None,
+    semantic_cache_save=None,
     detector=True,
     detector_limit=None,
     detector_timeout=60,
     detector_cache=None,
+    detector_cache_save=None,
 ):
     images = collect_image_files(input_path, include_pdf=False, include_mineru=True, output_dir=output_dir)
     analyses = sorted((analyze_image_reasonability(path) for path in images), key=_image_audit_sort_key)
@@ -7303,12 +7314,14 @@ def build_image_audit(
             semantic_result = semantic_cache.get(cache_key)
             if isinstance(semantic_result, dict) and semantic_result.get("status") == "error":
                 semantic_cache.pop(cache_key, None)
+                _flush_image_cache(semantic_cache_save, "图像语义")
                 semantic_result = None
             if not semantic_result:
                 print(f"  🖼️ GLM图像语义分析 [{idx}/{len(semantic_queue)}] {item.get('file', '')}")
                 semantic_result = call_glm_image_semantics(item.get("path", ""), timeout=semantic_timeout)
                 if semantic_result.get("status") != "error":
                     semantic_cache[cache_key] = semantic_result
+                    _flush_image_cache(semantic_cache_save, "图像语义")
             item["semantic"] = semantic_result
             semantic_checked += 1
     detector_checked = 0
@@ -7320,12 +7333,14 @@ def build_image_audit(
             detector_result = detector_cache.get(cache_key)
             if isinstance(detector_result, dict) and detector_result.get("status") == "error":
                 detector_cache.pop(cache_key, None)
+                _flush_image_cache(detector_cache_save, "imagedetector")
                 detector_result = None
             if not detector_result:
                 print(f"  🖼️ imagedetector自动检测 [{idx}/{len(detector_queue)}] {item.get('file', '')}")
                 detector_result = call_imagedetector(item.get("path", ""), timeout=detector_timeout)
                 if detector_result.get("status") != "error":
                     detector_cache[cache_key] = detector_result
+                    _flush_image_cache(detector_cache_save, "imagedetector")
             item["detector"] = detector_result
             detector_checked += 1
     return {
@@ -8302,6 +8317,12 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
     image_detector_enabled = not args.no_image_detector
     if not args.no_image_semantic and not GLM_API_KEY:
         print("⚠️ GLM_API_KEY未配置，图像语义理解将跳过；本地合理性检测和imagedetector清单仍会生成")
+    image_semantic_cache_save = None
+    if image_semantic_enabled and not args.no_resume:
+        image_semantic_cache_save = lambda: _json_save(image_semantic_cache_path, image_semantic_cache)
+    image_detector_cache_save = None
+    if image_detector_enabled and not args.no_resume:
+        image_detector_cache_save = lambda: _json_save(image_detector_cache_path, image_detector_cache)
     image_audit = build_image_audit(
         str(input_path),
         output_dir=output_dir,
@@ -8310,10 +8331,12 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
         semantic_limit=args.image_semantic_limit,
         semantic_timeout=args.image_semantic_timeout,
         semantic_cache=image_semantic_cache,
+        semantic_cache_save=image_semantic_cache_save,
         detector=image_detector_enabled,
         detector_limit=args.image_detector_limit,
         detector_timeout=args.image_detector_timeout,
         detector_cache=image_detector_cache,
+        detector_cache_save=image_detector_cache_save,
     )
     if image_semantic_enabled and not args.no_resume:
         _json_save(image_semantic_cache_path, image_semantic_cache)
