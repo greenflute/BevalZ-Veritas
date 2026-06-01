@@ -39,3 +39,36 @@ Completed and archived all Trellis tasks for the third-party-first Paper Audit r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Create Andrej Karpathy skill
+
+**Date**: 2026-06-01
+**Task**: Create Andrej Karpathy skill
+**Branch**: `main`
+
+### Summary
+
+Created a local Codex karpathy-guidelines skill from the upstream Andrej Karpathy skills repository, validated it, and recorded verification results.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0d41852` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
