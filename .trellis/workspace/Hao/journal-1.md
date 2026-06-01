@@ -105,3 +105,36 @@ Made image semantic cache keys service-aware, merged visible and hidden resume c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Add HTML follow-up draft workflow
+
+**Date**: 2026-06-02
+**Task**: Add HTML follow-up draft workflow
+**Branch**: `main`
+
+### Summary
+
+Added the HTML-first PubPeer and journal Letter follow-up workflow with article identity confirmation, evidence selection, custom concerns, manual review confirmation, persisted followup artifacts, old-page reload support, README docs, and regression tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `310fec8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

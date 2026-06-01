@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
+- **Total Sessions**: 4
 - **Last Active**: 2026-06-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~107 | Active |
+| `journal-1.md` | ~140 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-06-02 | Add HTML follow-up draft workflow | `310fec8` | `main` |
 | 3 | 2026-06-02 | Fix image semantic cache resume | `175131e` | `main` |
 | 2 | 2026-06-01 | Create Andrej Karpathy skill | `0d41852` | `main` |
 | 1 | 2026-05-28 | Complete third-party-first Trellis tasks | `2c81c86`, `6767acf` | `main` |
