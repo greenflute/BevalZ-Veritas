@@ -204,3 +204,37 @@ Implemented deterministic cross-file consistency audit for directory reviews, in
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Evidence chain audit
+
+**Date**: 2026-06-02
+**Task**: Evidence chain audit
+**Branch**: `main`
+
+### Summary
+
+Added deterministic evidence-chain audit with evidence clusters, Methods/Results/Abstract-Conclusion chain findings, report/action-context integration, offline tests, and backend spec contract.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `95e2a39` | (see git log) |
+| `cbed993` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
