@@ -239,7 +239,7 @@ def ensure_runtime_meta(meta: Dict[str, Any] = None) -> Dict[str, Any]:
 # LLM运行参数：由CLI覆盖。默认保守，避免一次请求无限阻塞。
 LLM_TIMEOUT = 45
 LLM_RETRIES = 1
-EXTRACT_CACHE_VERSION = 6
+EXTRACT_CACHE_VERSION = 7
 MIN_IMAGE_BYTES = 5000
 IMAGE_SEMANTIC_CACHE_VERSION = 3
 
@@ -5001,6 +5001,386 @@ def _brief_text(text, limit=180):
     return text
 
 
+def _cross_file_source_label(category):
+    return {
+        "main_text": "正文",
+        "supplement": "补充材料",
+        "data_file": "数据文件",
+        "other": "其他材料",
+    }.get(category or "", category or "未知来源")
+
+
+def _cross_file_source_rank(category):
+    return {
+        "main_text": 0,
+        "supplement": 1,
+        "data_file": 2,
+        "other": 3,
+    }.get(category or "", 9)
+
+
+def _cross_file_segment_text(text):
+    raw = _clean_mineru_table_block(str(text or ""))
+    raw = re.sub(r"\[\[/?(?:BLOCK|FIGURE)[^\]]*\]\]", " ", raw, flags=re.I)
+    segments = []
+    for line in raw.splitlines():
+        line = re.sub(r"\s+", " ", line).strip()
+        if not line:
+            continue
+        for part in re.split(r"(?<=[。.!?])\s+|\s{2,}", line):
+            part = part.strip()
+            if 12 <= len(part) <= 800:
+                segments.append(part)
+    return segments[:1200]
+
+
+_CROSS_FILE_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "were", "was", "are",
+    "into", "have", "has", "had", "not", "all", "table", "figure", "supplement",
+    "supplementary", "group", "groups", "cohort", "sample", "samples", "patients",
+    "subjects", "mice", "cells", "results", "method", "methods", "study", "data",
+}
+
+
+def _cross_file_terms(text):
+    lowered = str(text or "").lower()
+    terms = set()
+    for token in re.findall(r"[a-z][a-z0-9_-]{2,}|[A-Za-z]*\d+[A-Za-z]*", lowered):
+        token = token.strip("_-")
+        if token and token not in _CROSS_FILE_STOPWORDS:
+            terms.add(token)
+    return terms
+
+
+def _cross_file_is_noisy(text):
+    raw = str(text or "")
+    if "[文件解析失败" in raw or "[文本过长已截断]" in raw:
+        return True
+    pipe_count = raw.count("|")
+    return pipe_count >= 8 and pipe_count > max(2, len(raw) // 80)
+
+
+def _extract_cross_file_sample_records(entry):
+    records = []
+    patterns = [
+        re.compile(r"\b[nN]\s*[=:：]\s*(\d{1,5})\b"),
+        re.compile(r"\b(\d{1,5})\s+(?:patients?|subjects?|participants?|samples?|mice|cells|cases)\b", re.I),
+    ]
+    for segment in _cross_file_segment_text(entry.get("text", "")):
+        if not re.search(r"\b(?:n\s*[=:：]|\d+\s+(?:patients?|subjects?|participants?|samples?|mice|cells|cases))", segment, re.I):
+            continue
+        for pattern in patterns:
+            for match in pattern.finditer(segment):
+                try:
+                    value = int(match.group(1))
+                except Exception:
+                    continue
+                if value <= 0:
+                    continue
+                records.append({
+                    "value": value,
+                    "terms": _cross_file_terms(segment),
+                    "excerpt": segment,
+                    "file": entry.get("file", ""),
+                    "path": entry.get("path", ""),
+                    "category": entry.get("category", ""),
+                    "noisy": _cross_file_is_noisy(segment),
+                })
+    return records
+
+
+def _cross_file_shared_terms(a, b):
+    return sorted((a.get("terms") or set()) & (b.get("terms") or set()))
+
+
+def _cross_file_context_match(a, b):
+    shared = _cross_file_shared_terms(a, b)
+    if shared:
+        return shared
+    a_text = str(a.get("excerpt") or "").lower()
+    b_text = str(b.get("excerpt") or "").lower()
+    figure_tokens_a = set(re.findall(r"\b(?:fig(?:ure)?|table)\s*s?\d+[a-z]?\b", a_text, flags=re.I))
+    figure_tokens_b = set(re.findall(r"\b(?:fig(?:ure)?|table)\s*s?\d+[a-z]?\b", b_text, flags=re.I))
+    return sorted(figure_tokens_a & figure_tokens_b)
+
+
+def _cross_file_finding(conflict_type, severity, claim, counter, reason, manual_check):
+    return {
+        "conflict_type": conflict_type,
+        "severity": severity,
+        "claim": claim.get("text", ""),
+        "claim_source": claim.get("category", ""),
+        "claim_source_label": _cross_file_source_label(claim.get("category", "")),
+        "claim_file": claim.get("file", ""),
+        "claim_excerpt": _brief_text(claim.get("excerpt", ""), 420),
+        "counter_evidence": counter.get("text", ""),
+        "counter_source": counter.get("category", ""),
+        "counter_source_label": _cross_file_source_label(counter.get("category", "")),
+        "counter_file": counter.get("file", ""),
+        "counter_excerpt": _brief_text(counter.get("excerpt", ""), 420),
+        "reason": reason,
+        "manual_check": manual_check,
+    }
+
+
+def _cross_file_sample_findings(entries):
+    records = []
+    for entry in entries:
+        records.extend(_extract_cross_file_sample_records(entry))
+    findings = []
+    seen = set()
+    for idx, a in enumerate(records):
+        for b in records[idx + 1:]:
+            if a.get("value") == b.get("value"):
+                continue
+            if a.get("category") == b.get("category") and a.get("file") == b.get("file"):
+                continue
+            shared = _cross_file_context_match(a, b)
+            if not shared:
+                continue
+            severity = "weak" if a.get("noisy") or b.get("noisy") else "strong"
+            key = (
+                "sample_size_mismatch",
+                tuple(sorted([a.get("file", ""), b.get("file", "")])),
+                tuple(sorted([a.get("value"), b.get("value")])),
+                tuple(shared[:4]),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            first, second = sorted([a, b], key=lambda item: _cross_file_source_rank(item.get("category")))
+            findings.append(_cross_file_finding(
+                "sample_size_mismatch",
+                severity,
+                {
+                    **first,
+                    "text": f"{_cross_file_source_label(first.get('category'))}报告样本量 n={first.get('value')}",
+                },
+                {
+                    **second,
+                    "text": f"{_cross_file_source_label(second.get('category'))}报告样本量 n={second.get('value')}",
+                },
+                f"相近上下文共享关键词 {', '.join(shared[:6])}，但样本量分别为 {first.get('value')} 和 {second.get('value')}。",
+                "核对同一实验/队列/分组的最终纳入样本数、排除标准和表格版本是否一致。",
+            ))
+    return findings
+
+
+def _normalize_group_label(label):
+    label = re.sub(r"\s+", " ", str(label or "").strip().lower())
+    aliases = {
+        "wt": "wildtype",
+        "wild-type": "wildtype",
+        "ko": "knockout",
+    }
+    return aliases.get(label, label)
+
+
+def _extract_cross_file_group_labels(entry):
+    labels = {}
+    patterns = [
+        re.compile(r"\b(control|vehicle|placebo|treatment|treated|case|experimental|sham|wildtype|wild-type|wt|knockout|ko|disease)\s+(?:group|arm|cohort)\b", re.I),
+        re.compile(r"\b(?:group|arm|cohort)\s+(?:of\s+)?(control|vehicle|placebo|treatment|treated|case|experimental|sham|wildtype|wild-type|wt|knockout|ko|disease)\b", re.I),
+    ]
+    for segment in _cross_file_segment_text(entry.get("text", "")):
+        for pattern in patterns:
+            for match in pattern.finditer(segment):
+                label = _normalize_group_label(match.group(1))
+                labels.setdefault(label, {
+                    "label": label,
+                    "excerpt": segment,
+                    "file": entry.get("file", ""),
+                    "path": entry.get("path", ""),
+                    "category": entry.get("category", ""),
+                })
+    return labels
+
+
+def _cross_file_group_findings(entries):
+    by_category = collections.defaultdict(dict)
+    for entry in entries:
+        labels = _extract_cross_file_group_labels(entry)
+        by_category[entry.get("category", "")].update(labels)
+    main_labels = by_category.get("main_text") or {}
+    other_labels = {}
+    for category, labels in by_category.items():
+        if category != "main_text":
+            other_labels.update(labels)
+    findings = []
+    if "control" in main_labels and "vehicle" in other_labels and "vehicle" not in main_labels:
+        findings.append(_cross_file_finding(
+            "group_label_mismatch",
+            "medium",
+            {**main_labels["control"], "text": "正文使用 Control group"},
+            {**other_labels["vehicle"], "text": "补充/数据材料使用 Vehicle group"},
+            "正文与补充/数据材料使用了不同的对照组标签；两者可能是同义设计，也可能代表分组命名不一致。",
+            "核对方法学定义、图表标签和原始分组编码，确认 Control 与 Vehicle 是否为同一组。",
+        ))
+    return findings
+
+
+def _extract_supplementary_refs(text):
+    refs = []
+    pattern = re.compile(r"\b(?:Supplementary|Supplemental|附表|补充图|补充表)\s*(?:Fig(?:ure)?|Table)?\s*S?(\d+[A-Za-z]?)\b|\b(?:Fig(?:ure)?|Table)\s*S(\d+[A-Za-z]?)\b", re.I)
+    for segment in _cross_file_segment_text(text):
+        for match in pattern.finditer(segment):
+            number = (match.group(1) or match.group(2) or "").lower()
+            if number:
+                refs.append((f"s{number}" if not number.startswith("s") else number, segment))
+    return refs
+
+
+def _cross_file_figure_table_findings(entries):
+    main_text = "\n".join(entry.get("text", "") for entry in entries if entry.get("category") == "main_text")
+    supplemental_text = "\n".join(entry.get("text", "") for entry in entries if entry.get("category") in {"supplement", "data_file"})
+    if not main_text or not supplemental_text:
+        return []
+    supplement_lower = supplemental_text.lower()
+    findings = []
+    seen = set()
+    for ref_id, excerpt in _extract_supplementary_refs(main_text):
+        if ref_id in seen:
+            continue
+        seen.add(ref_id)
+        compact = ref_id.replace("s", "")
+        if ref_id in supplement_lower or f"table {compact}" in supplement_lower or f"figure {compact}" in supplement_lower:
+            continue
+        findings.append(_cross_file_finding(
+            "supplement_reference_gap",
+            "weak",
+            {
+                "category": "main_text",
+                "file": "main_text",
+                "excerpt": excerpt,
+                "text": f"正文引用补充材料 {ref_id.upper()}",
+            },
+            {
+                "category": "supplement",
+                "file": "supplement/data files",
+                "excerpt": f"未在已提取补充/数据文本中找到 {ref_id.upper()} 的直接标记。",
+                "text": "补充材料标记覆盖不足",
+            },
+            "正文出现补充图表引用，但已提取补充材料中未找到对应编号标记。",
+            "核对补充材料文件是否完整、编号是否被OCR/表格提取改写，或是否缺失对应补充图表。",
+        ))
+        if len(findings) >= 8:
+            break
+    return findings
+
+
+def build_cross_file_consistency_audit(file_entries, root_path=None):
+    entries = []
+    for entry in file_entries or []:
+        text = str(entry.get("text") or "")
+        category = entry.get("category") or "other"
+        if not text.strip() or category == "reference":
+            continue
+        entries.append({
+            "file": entry.get("file") or Path(entry.get("path", "")).name,
+            "path": entry.get("path") or entry.get("file") or "",
+            "category": category,
+            "text": text,
+        })
+    cross_categories = {entry.get("category") for entry in entries if entry.get("category") != "main_text"}
+    if len(entries) < 2 or not cross_categories:
+        return {
+            "status": "skipped",
+            "checked_files": len(entries),
+            "finding_count": 0,
+            "strong_count": 0,
+            "medium_count": 0,
+            "weak_count": 0,
+            "findings": [],
+            "note": "缺少可比较的跨文件材料；跨文件一致性审查已跳过。",
+        }
+    findings = []
+    findings.extend(_cross_file_sample_findings(entries))
+    findings.extend(_cross_file_group_findings(entries))
+    findings.extend(_cross_file_figure_table_findings(entries))
+    severity_rank = {"strong": 0, "medium": 1, "weak": 2}
+    findings = sorted(findings, key=lambda item: (severity_rank.get(item.get("severity"), 9), item.get("conflict_type", ""), item.get("claim_file", "")))[:40]
+    return {
+        "status": "ok",
+        "checked_files": len(entries),
+        "finding_count": len(findings),
+        "strong_count": sum(1 for item in findings if item.get("severity") == "strong"),
+        "medium_count": sum(1 for item in findings if item.get("severity") == "medium"),
+        "weak_count": sum(1 for item in findings if item.get("severity") == "weak"),
+        "findings": findings,
+        "note": "基于已提取文本的跨文件一致性审查；不等同于最终科研不端判断。",
+    }
+
+
+def _cross_file_severity_label(severity):
+    return {
+        "strong": "强证据冲突",
+        "medium": "中等疑点",
+        "weak": "弱信号/需人工核对",
+    }.get(severity or "", severity or "未知")
+
+
+def format_cross_file_consistency_markdown(audit):
+    if audit is None:
+        return []
+    lines = [
+        "## 🧩 跨文件一致性审查",
+        "",
+        f"**状态**: {audit.get('status', 'N/A')}",
+        f"**检查文件数**: {audit.get('checked_files', 0)}",
+        f"**发现数**: {audit.get('finding_count', 0)}（强 {audit.get('strong_count', 0)} / 中 {audit.get('medium_count', 0)} / 弱 {audit.get('weak_count', 0)}）",
+        f"> {audit.get('note', '')}",
+        "",
+    ]
+    findings = audit.get("findings") or []
+    if findings:
+        lines.append("| # | 级别 | 类型 | 证据A | 证据B | 复核建议 |")
+        lines.append("|---|------|------|-------|-------|----------|")
+        for idx, finding in enumerate(findings[:30], 1):
+            claim = f"{finding.get('claim_source_label') or finding.get('claim_source')} / {finding.get('claim_file')}: {finding.get('claim_excerpt')}"
+            counter = f"{finding.get('counter_source_label') or finding.get('counter_source')} / {finding.get('counter_file')}: {finding.get('counter_excerpt')}"
+            lines.append(
+                f"| {idx} | {_md_escape_cell(_cross_file_severity_label(finding.get('severity')))} | "
+                f"{_md_escape_cell(finding.get('conflict_type', ''))} | {_md_escape_cell(_brief_text(claim, 260))} | "
+                f"{_md_escape_cell(_brief_text(counter, 260))} | {_md_escape_cell(finding.get('manual_check', ''))} |"
+            )
+    else:
+        lines.append("> 未发现明确跨文件不一致；仍建议人工抽查关键表格、补充材料和正文结论。")
+    lines.append("")
+    return lines
+
+
+def format_cross_file_consistency_html(audit):
+    if not audit:
+        return ""
+    findings = audit.get("findings") or []
+    if findings:
+        cards = ""
+        for idx, finding in enumerate(findings[:40], 1):
+            cards += f"""
+        <details class="cross-file-card">
+          <summary class="cross-file-summary">
+            <span class="cross-file-rank">#{idx}</span>
+            <span class="cross-file-severity cross-file-{_html_escape(finding.get('severity', ''))}">{_html_escape(_cross_file_severity_label(finding.get('severity')))}</span>
+            <span class="cross-file-title">{_html_escape(finding.get('conflict_type', ''))}</span>
+            <span class="cross-file-reason">{_html_escape(_brief_text(finding.get('reason', ''), 140))}</span>
+          </summary>
+          <div class="cross-file-body">
+            <div><strong>{_html_escape(finding.get('claim_source_label') or finding.get('claim_source'))} / {_html_escape(finding.get('claim_file', ''))}</strong><p>{_html_escape(finding.get('claim_excerpt', ''))}</p></div>
+            <div><strong>{_html_escape(finding.get('counter_source_label') or finding.get('counter_source'))} / {_html_escape(finding.get('counter_file', ''))}</strong><p>{_html_escape(finding.get('counter_excerpt', ''))}</p></div>
+            <p><strong>复核建议</strong>: {_html_escape(finding.get('manual_check', ''))}</p>
+          </div>
+        </details>"""
+    else:
+        cards = '<div class="muted">未发现明确跨文件不一致；仍建议人工抽查关键表格、补充材料和正文结论。</div>'
+    return f"""
+  <div class="section cross-file-section">
+    <h2>跨文件一致性审查</h2>
+    <p><strong>状态</strong>: {_html_escape(audit.get('status', 'N/A'))} | <strong>文件</strong>: {audit.get('checked_files', 0)} | <strong>发现</strong>: {audit.get('finding_count', 0)}（强 {audit.get('strong_count', 0)} / 中 {audit.get('medium_count', 0)} / 弱 {audit.get('weak_count', 0)}）</p>
+    <p class="section-hint">{_html_escape(audit.get('note', ''))}</p>
+    <div class="cross-file-list">{cards}</div>
+  </div>"""
+
+
 def _split_markdown_table_row(line):
     line = str(line or "").strip()
     if line.startswith("|"):
@@ -5418,6 +5798,18 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "title": f"{len(issues)}项代码仓库/在线资源需复核",
             "detail": "优先核对不可访问、格式错误或访问受限的代码仓库、Streamlit等论文声明资源。",
         })
+    cross_file_audit = meta.get("cross_file_consistency_audit") or {}
+    cross_findings = cross_file_audit.get("findings") or []
+    if cross_findings:
+        strong = cross_file_audit.get("strong_count", 0)
+        medium = cross_file_audit.get("medium_count", 0)
+        score = 255 if strong else 225
+        items.append({
+            "score": score,
+            "source": "跨文件一致性审查",
+            "title": f"{len(cross_findings)}项跨文件一致性疑点",
+            "detail": f"强证据冲突 {strong} 项，中等疑点 {medium} 项；优先核对正文、补充材料和数据表中的样本量/分组/图表编号。",
+        })
     image_audit = meta.get("image_audit") or {}
     image_warnings = [img for img in image_audit.get("images", []) if img.get("risk") == "local_warning"]
     semantic_warnings = []
@@ -5515,6 +5907,24 @@ def _report_action_context(report, pdf_path, meta, stat_result):
             "evidence": _brief_text(_clean_mineru_table_block(_check_source_text(c)), 900),
             "reason": _brief_text(_check_reason(c), 900),
         })
+    cross_file_audit = (meta or {}).get("cross_file_consistency_audit") or {}
+    cross_file_issues = []
+    for idx, finding in enumerate((cross_file_audit.get("findings") or [])[:8], 1):
+        cross_file_issue = {
+            "id": f"cross-file-{idx}",
+            "source": "cross_file_consistency",
+            "category": "跨文件一致性审查",
+            "item": finding.get("conflict_type", ""),
+            "verdict": _cross_file_severity_label(finding.get("severity")),
+            "evidence": _brief_text(
+                f"{finding.get('claim_source_label')} / {finding.get('claim_file')}: {finding.get('claim_excerpt')} "
+                f"|| {finding.get('counter_source_label')} / {finding.get('counter_file')}: {finding.get('counter_excerpt')}",
+                900,
+            ),
+            "reason": _brief_text(finding.get("reason") or finding.get("manual_check"), 900),
+        }
+        cross_file_issues.append(cross_file_issue)
+    issues = cross_file_issues + issues
     reference_audit = (meta or {}).get("reference_audit") or {}
     ref_issues = []
     for issue in (reference_audit.get("issues") or [])[:8]:
@@ -5567,6 +5977,12 @@ def _report_action_context(report, pdf_path, meta, stat_result):
         "detection_score": report.get("detection_score", "") if isinstance(report, dict) else "",
         "conclusion": _brief_text(report.get("conclusion", ""), 1200) if isinstance(report, dict) else "",
         "top_issues": issues,
+        "cross_file_consistency": {
+            "status": cross_file_audit.get("status"),
+            "checked_files": cross_file_audit.get("checked_files"),
+            "finding_count": cross_file_audit.get("finding_count"),
+            "findings": cross_file_issues,
+        },
         "stat": {
             "number_count": stat_result.get("number_count"),
             "p_value_count": stat_result.get("p_value_count"),
@@ -5961,6 +6377,7 @@ def format_report(report, pdf_path, meta, stat_result):
         lines.append("")
 
     lines.extend(format_image_audit_markdown(meta.get("image_audit")))
+    lines.extend(format_cross_file_consistency_markdown(meta.get("cross_file_consistency_audit")))
     lines.extend(format_resource_audit_markdown(meta.get("resource_audit")))
     lines.extend(format_reference_audit_markdown(meta.get("reference_audit")))
 
@@ -6035,6 +6452,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
     resource_audit_html = format_resource_audit_html(meta.get("resource_audit"))
     reference_audit_html = format_reference_audit_html(meta.get("reference_audit"))
     image_audit_html = format_image_audit_html(meta.get("image_audit"))
+    cross_file_audit_html = format_cross_file_consistency_html(meta.get("cross_file_consistency_audit"))
     web_action_panel_html = format_web_action_panel_html(report, pdf_path, meta, stat_result) if not report.get("parse_error") else ""
     breakdown = report.get("score_breakdown") or {}
     score_breakdown_html = ""
@@ -6510,6 +6928,64 @@ def format_html_report(report, pdf_path, meta, stat_result):
     flex-direction: column;
     gap: 10px;
   }}
+  .cross-file-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }}
+  .cross-file-card {{
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--yellow);
+    border-radius: 10px;
+    background: #fff8ed;
+    padding: 12px 14px;
+  }}
+  .cross-file-card[open] {{
+    background: #fbfbfb;
+  }}
+  .cross-file-summary {{
+    cursor: pointer;
+    list-style: none;
+    display: grid;
+    grid-template-columns: 46px minmax(110px, 160px) minmax(180px, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+  }}
+  .cross-file-summary::-webkit-details-marker {{ display: none; }}
+  .cross-file-rank {{
+    color: var(--accent);
+    font-weight: 800;
+  }}
+  .cross-file-severity {{
+    font-weight: 800;
+    border-radius: 999px;
+    padding: 3px 8px;
+    text-align: center;
+    background: rgba(183,121,31,0.12);
+  }}
+  .cross-file-strong {{ color: var(--red); }}
+  .cross-file-medium {{ color: var(--yellow); }}
+  .cross-file-weak {{ color: var(--text-muted); }}
+  .cross-file-title {{
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }}
+  .cross-file-reason {{
+    grid-column: 2 / 4;
+    color: var(--text-muted);
+    font-size: 13px;
+  }}
+  .cross-file-body {{
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-size: 14px;
+    display: grid;
+    gap: 10px;
+  }}
+  .cross-file-body p {{
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+  }}
   .reference-card {{
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -6872,6 +7348,13 @@ def format_html_report(report, pdf_path, meta, stat_result):
     border-radius: 6px;
     padding: 10px 12px;
   }}
+  .cross-file-card {{
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--yellow);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }}
   .evidence-summary {{ border-left: 3px solid var(--red); }}
   .suspicion-summary {{
     grid-template-columns: 44px minmax(72px, 112px) minmax(180px, 1fr) 96px;
@@ -6902,6 +7385,9 @@ def format_html_report(report, pdf_path, meta, stat_result):
     margin-left: auto;
   }}
   .detail-card[open], .suspicion-card[open] {{
+    background: #fbfbfb;
+  }}
+  .cross-file-card[open] {{
     background: #fbfbfb;
   }}
   .detail-summary::after, .suspicion-summary::after {{
@@ -7053,6 +7539,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
   {web_action_panel_html}
   {conclusion_html}
   {image_audit_html}
+  {cross_file_audit_html}
   {resource_audit_html}
   {reference_audit_html}
 
@@ -8511,9 +8998,11 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
     # ─── 阶段1：文本提取（支持单个文件/整个论文目录） ───
     extract_cache_path = resume_dir / "stage1_extract.json"
     cached_extract = None if args.no_resume else _json_load(extract_cache_path)
+    extracted_file_texts = []
     if cached_extract and cached_extract.get("input") == str(input_path.resolve()) and cached_extract.get("use_mineru") == use_mineru_default and cached_extract.get("cache_version") == EXTRACT_CACHE_VERSION:
         full_text = cached_extract.get("full_text", "")
         meta = cached_extract.get("meta", {})
+        extracted_file_texts = cached_extract.get("file_texts") or []
         raw_pdf = None
         use_mineru = cached_extract.get("use_mineru", use_mineru_default)
         print(f"🔁 断点续作：复用阶段1文本缓存 {extract_cache_path} ({len(full_text)}字符)")
@@ -8540,9 +9029,19 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
         reference_file_set = set(file_classes.get("references") or [])
         audit_files = [p for p in all_files if p not in reference_file_set]
 
+        def _file_audit_category(path):
+            if path == file_classes.get("main_paper"):
+                return "main_text"
+            if path in set(file_classes.get("supplements") or []):
+                return "supplement"
+            if path in set(file_classes.get("data_files") or []):
+                return "data_file"
+            return "other"
+
         # 提取所有非参考文献文件文本合并；参考文献文件单独校检，避免污染主体审查
         full_text = ""
         reference_file_texts = []
+        extracted_file_texts = []
         total_files = len(audit_files)
         for idx, file_path in enumerate(audit_files, 1):
             print(f"  📝 提取主体文件 [{idx}/{total_files}] {file_path.name}...")
@@ -8551,6 +9050,16 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                                                   use_mineru=use_mineru,
                                                   mineru_lang=args.mineru_lang,
                                                   output_dir=output_dir)
+            try:
+                rel_path = str(file_path.relative_to(input_path))
+            except Exception:
+                rel_path = file_path.name
+            extracted_file_texts.append({
+                "file": file_path.name,
+                "path": rel_path,
+                "category": _file_audit_category(file_path),
+                "text": file_content,
+            })
             progress_bar(idx, max(total_files, 1), f"阶段1/5 已完成: {file_path.name}")
             full_text += f"\n\n=== 文件: {file_path.name} 路径: {file_path.relative_to(input_path)} ==="
             full_text += "\n" + file_content
@@ -8677,6 +9186,12 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                 "extractor": "single_file_multi_format",
                 "extraction_method": f"{single_suffix.lstrip('.')}_text",
             }
+            extracted_file_texts = [{
+                "file": pdf_path.name,
+                "path": pdf_path.name,
+                "category": "main_text",
+                "text": full_text,
+            }]
             raw_pdf = None
             print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
             progress_bar(1, 5, "阶段1/5 单文件文本提取完成")
@@ -8696,6 +9211,12 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                     meta["mineru_batch_id"] = md_meta["batch_id"]
                 if md_meta.get("task_id"):
                     meta["mineru_task_id"] = md_meta["task_id"]
+                extracted_file_texts = [{
+                    "file": pdf_path.name,
+                    "path": pdf_path.name,
+                    "category": "main_text",
+                    "text": full_text,
+                }]
                 print(f"✅ MinerU提取完成: {len(md_text)} 字符（全文保留）")
                 progress_bar(1, 5, "阶段1/5 MinerU文本提取完成")
             else:
@@ -8728,12 +9249,19 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                     meta={"input_path": str(input_path)},
                 )
             print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
+            extracted_file_texts = [{
+                "file": pdf_path.name,
+                "path": pdf_path.name,
+                "category": "main_text",
+                "text": full_text,
+            }]
             progress_bar(1, 5, "阶段1/5 PDF文本提取完成")
 
     meta = normalize_run_meta(meta, input_path, full_text)
     meta["runtime"] = run_runtime
     meta["paper_identity"] = extract_paper_identity(full_text, input_path)
     meta["preflight_results"] = preflight_results
+    meta["cross_file_consistency_audit"] = build_cross_file_consistency_audit(extracted_file_texts, root_path=input_path)
     completed_stages.append("stage1_text_extraction")
 
     if not args.no_resume and full_text:
@@ -8744,6 +9272,7 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
             "mineru_lang": args.mineru_lang,
             "full_text": full_text,
             "meta": meta,
+            "file_texts": extracted_file_texts,
             "saved_at": time.strftime("%F %T"),
         })
         resume_event(resume_dir, "stage1_extract", "saved", f"chars={len(full_text)}; use_mineru={use_mineru}", cache=str(extract_cache_path))
@@ -9188,7 +9717,7 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
 
     if args.json:
         json_path.write_text(
-            json.dumps({"report_type": meta.get("artifact_type", "complete"), "llm_report": report, "stat_result": stat_result, "meta": meta, "reference_audit": reference_audit, "resource_audit": resource_audit},
+            json.dumps({"report_type": meta.get("artifact_type", "complete"), "llm_report": report, "stat_result": stat_result, "meta": meta, "reference_audit": reference_audit, "resource_audit": resource_audit, "cross_file_consistency_audit": meta.get("cross_file_consistency_audit")},
                        ensure_ascii=False, indent=2),
             encoding="utf-8")
         print(f"✅ 原始JSON已保存: {json_path}")

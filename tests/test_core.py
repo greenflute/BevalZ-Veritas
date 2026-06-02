@@ -636,6 +636,130 @@ def test_local_stat_check_flags_abnormal_p_values_and_sample_conflict():
     assert result["sd_count"] == 1
 
 
+def test_cross_file_consistency_detects_sample_size_mismatch():
+    audit = paper_audit.build_cross_file_consistency_audit([
+        {
+            "file": "main.pdf",
+            "path": "main.pdf",
+            "category": "main_text",
+            "text": "Experiment alpha measured tumor volume in the treatment cohort with n=42 mice.",
+        },
+        {
+            "file": "supplement.docx",
+            "path": "supplement.docx",
+            "category": "supplement",
+            "text": "Supplement table: experiment alpha treatment cohort n=24 mice after exclusions.",
+        },
+    ])
+
+    assert audit["status"] == "ok"
+    assert audit["strong_count"] == 1
+    finding = audit["findings"][0]
+    assert finding["conflict_type"] == "sample_size_mismatch"
+    assert finding["severity"] == "strong"
+    assert "main.pdf" in finding["claim_file"]
+    assert "supplement.docx" in finding["counter_file"]
+    assert finding["manual_check"]
+
+
+def test_cross_file_consistency_matching_sample_sizes_no_false_positive():
+    audit = paper_audit.build_cross_file_consistency_audit([
+        {
+            "file": "main.pdf",
+            "path": "main.pdf",
+            "category": "main_text",
+            "text": "Experiment alpha measured tumor volume in the treatment cohort with n=42 mice.",
+        },
+        {
+            "file": "supplement.docx",
+            "path": "supplement.docx",
+            "category": "supplement",
+            "text": "Supplement table: experiment alpha treatment cohort n=42 mice after exclusions.",
+        },
+    ])
+
+    assert audit["finding_count"] == 0
+
+
+def test_cross_file_consistency_noisy_table_mismatch_is_weak():
+    audit = paper_audit.build_cross_file_consistency_audit([
+        {
+            "file": "main.pdf",
+            "path": "main.pdf",
+            "category": "main_text",
+            "text": "Experiment alpha treatment cohort n=42 mice.",
+        },
+        {
+            "file": "supplement.csv",
+            "path": "supplement.csv",
+            "category": "data_file",
+            "text": "experiment alpha treatment cohort | n=24 | a | b | c | d | e | f | g | h | i | j | k | l",
+        },
+    ])
+
+    assert audit["finding_count"] == 1
+    assert audit["findings"][0]["severity"] == "weak"
+
+
+def test_cross_file_consistency_detects_group_label_mismatch():
+    audit = paper_audit.build_cross_file_consistency_audit([
+        {
+            "file": "main.pdf",
+            "path": "main.pdf",
+            "category": "main_text",
+            "text": "Methods define the Control group for experiment beta.",
+        },
+        {
+            "file": "supplement.xlsx",
+            "path": "supplement.xlsx",
+            "category": "data_file",
+            "text": "Sheet beta lists Vehicle group measurements for the same assay.",
+        },
+    ])
+
+    assert any(
+        finding["conflict_type"] == "group_label_mismatch" and finding["severity"] == "medium"
+        for finding in audit["findings"]
+    )
+
+
+def test_cross_file_consistency_renders_reports_and_followup_context():
+    audit = paper_audit.build_cross_file_consistency_audit([
+        {
+            "file": "main.pdf",
+            "path": "main.pdf",
+            "category": "main_text",
+            "text": "Experiment alpha measured tumor volume in the treatment cohort with n=42 mice.",
+        },
+        {
+            "file": "supplement.docx",
+            "path": "supplement.docx",
+            "category": "supplement",
+            "text": "Supplement table: experiment alpha treatment cohort n=24 mice after exclusions.",
+        },
+    ])
+    report = {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"}
+    stat = {
+        "benford_deviation": 0,
+        "benford_status": None,
+        "p_value_count": 0,
+        "p_value_abnormal": 0,
+        "sd_count": 0,
+        "number_count": 0,
+    }
+    meta = {"cross_file_consistency_audit": audit}
+
+    markdown = paper_audit.format_report(report, "paper.pdf", meta, stat)
+    html = paper_audit.format_html_report(report, "paper.pdf", meta, stat)
+    context = paper_audit._report_action_context(report, "paper.pdf", meta, stat)
+
+    assert "跨文件一致性审查" in markdown
+    assert "sample_size_mismatch" in markdown
+    assert "cross-file-card" in html
+    assert context["cross_file_consistency"]["finding_count"] == 1
+    assert context["top_issues"][0]["source"] == "cross_file_consistency"
+
+
 def test_smart_chunk_text_never_exceeds_limit_for_long_paragraph():
     text = "A" * 350 + "\n\n" + "B" * 350 + "\n\n" + "C" * 350
 

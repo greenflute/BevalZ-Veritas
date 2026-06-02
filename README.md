@@ -19,6 +19,7 @@
 
 ### 🔧 技术特性
 - 📁 **目录级综合审查**：传入论文目录，自动识别PDF/Word/Excel/补充材料/原始数据，跨文件交叉验证
+- 🧩 **跨文件一致性审查**：对正文、补充材料和数据表中的样本量、分组标签、补充图表编号做确定性比对，输出可复核证据而非不端结论
 - 📝 **MinerU PDF解析**：公开文献审查默认使用 MinerU 将原生PDF/扫描件/图片PDF转Markdown，保留表格、公式、图片标注
 - 📚 **参考文献在线核验**：DOI优先，联合Crossref/OpenAlex/PubMed检索引用真实性与题名/年份一致性
 - 🖼️ **图像多路审查**：收集MinerU提取图片，执行轻量合理性筛查、图像语义分析，并自动调用 imagedetector.com 子工具记录AI概率
@@ -128,6 +129,7 @@ python paper_audit.py --update-patterns pubpeer_comments.txt
 - `*.audit.md` / `*.audit.html`：完整审查；加 `--json` 时同时写入 `*.audit.json`
 - `*.limited.md` / `*.limited.html`：范围受限审查；加 `--json` 时同时写入 `*.limited.json`
 - `*.failed.md` / `*.failed.html` / `*.failed.json`：失败诊断始终写入三类产物，便于定位失败能力和断点续跑命令
+- 目录审查会在 Markdown/HTML/JSON 中加入“跨文件一致性审查”，单文件输入或缺少补充材料时会显示跳过原因。
 
 默认行为：
 - 审查成功生成HTML后，会自动打开浏览器查看报告。

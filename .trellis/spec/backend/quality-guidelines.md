@@ -279,3 +279,38 @@ full_text, meta, raw_pdf = extract_pdf_text(str(input_path), max_chars=999999)
 ```python
 full_text = extract_text_from_file(input_path, max_chars_per_file=None, use_mineru=False)
 ```
+
+## Scenario: Cross-file Consistency Audit
+
+### 1. Scope / Trigger
+
+- Trigger: Directory audit has extracted text from the main paper plus
+  supplements, data files, or other non-reference paper materials.
+- This applies to deterministic cross-file checks for sample sizes, group
+  labels, and supplementary figure/table references.
+
+### 2. Signatures
+
+- `build_cross_file_consistency_audit(file_entries, root_path=None) -> dict`
+- `format_cross_file_consistency_markdown(audit) -> list[str]`
+- `format_cross_file_consistency_html(audit) -> str`
+
+### 3. Contracts
+
+- The audit must not call third-party services, local LLMs, or OCR services.
+- Results must be stored in `meta["cross_file_consistency_audit"]` and rendered
+  in Markdown, HTML, and JSON artifacts.
+- Single-file inputs or directories without cross-file material must return
+  `status: "skipped"` instead of failing the run.
+- Findings must include conflict type, severity, both source categories/files,
+  both source excerpts, reason, and manual-check guidance.
+- Wording must describe evidence conflicts or review needs, not misconduct
+  conclusions.
+
+### 4. Tests Required
+
+- Sample-size mismatch across main text and supplement -> strong finding.
+- Matching sample sizes -> no false positive.
+- Noisy table/OCR mismatch -> weak finding, not strong.
+- Control-group vs vehicle-group label inconsistency -> medium finding.
+- Markdown, HTML, JSON/action context expose the audit.
