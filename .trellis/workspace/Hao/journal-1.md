@@ -171,3 +171,36 @@ Added direct .docx single-file audit support through the existing multi-format e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Cross-file consistency audit
+
+**Date**: 2026-06-02
+**Task**: Cross-file consistency audit
+**Branch**: `main`
+
+### Summary
+
+Implemented deterministic cross-file consistency audit for directory reviews, including Markdown/HTML/JSON rendering, follow-up context integration, README/spec updates, and offline regression tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f35c0cd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
