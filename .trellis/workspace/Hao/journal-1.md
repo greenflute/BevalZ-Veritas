@@ -269,3 +269,37 @@ Applied the paper audit CLI to Test_paper2/2026-040896_稿件全文C.docx, insta
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Improve audit usability and report presentation
+
+**Date**: 2026-06-04
+**Task**: Improve audit usability and report presentation
+**Branch**: `main`
+
+### Summary
+
+Implemented CWD-relative explicit output paths, early run summaries, audit-scope extraction failure diagnostics, report review overview, internal evidence anchors, limited-scope panel, and failed recovery panel.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6a7ded` | (see git log) |
+| `08efaa5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
