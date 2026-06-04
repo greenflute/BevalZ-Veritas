@@ -477,6 +477,8 @@ def format_failed_audit_markdown(failure: AuditFailure, input_path: Path, meta: 
         "",
         "> 未生成完整审查报告。关键审查能力失败，本次运行只生成失败诊断产物。",
         "",
+        "## 失败恢复面板",
+        "",
         f"**文件**: `{input_path}`",
         f"**产物类型**: failed",
         f"**完整审查报告已生成**: 否",
@@ -541,6 +543,7 @@ def format_failed_audit_html(failure: AuditFailure, input_path: Path, meta: Dict
     hints = failed.get("fix_hints") or ["检查关键服务配置、网络连通性和服务商返回状态后重试。"]
     retry_command = failed.get("retry_command") or f"python paper_audit.py {_shell_quote(str(input_path))} --json"
     details = failed.get("details") or {}
+    cache_state = details.get("resume_dir") or details.get("cache_dir") or runtime.get("resume_dir") or "见运行日志/工作区"
     stages_html = "".join(f"<li>{_html_escape(stage)}</li>" for stage in stages)
     hints_html = "".join(f"<li>{_html_escape(hint)}</li>" for hint in hints)
     details_html = ""
@@ -573,9 +576,9 @@ ul {{ padding-left:22px; }}
 </head>
 <body>
 <main>
-  <div class="hero">
+  <div class="hero" id="failed-diagnostics">
     <div class="status">失败诊断 failed</div>
-    <h1>未生成完整审查报告</h1>
+    <h1>失败恢复面板</h1>
     <p>关键审查能力失败，本次运行只生成失败诊断产物；修复后可使用下方命令断点续跑。</p>
     <div class="grid">
       <div class="cell"><span>文件</span><strong>{_html_escape(str(input_path))}</strong></div>
@@ -583,6 +586,7 @@ ul {{ padding-left:22px; }}
       <div class="cell"><span>错误类别</span><strong>{_html_escape(failed.get('error_class'))}</strong></div>
       <div class="cell"><span>运行时间</span><strong>{_html_escape(runtime.get('local_time') or payload.get('created_at'))}</strong></div>
       <div class="cell"><span>运行时 UTC 年份</span><strong>{_html_escape(runtime.get('utc_year'))}</strong></div>
+      <div class="cell"><span>缓存/恢复状态</span><strong>{_html_escape(cache_state)}</strong></div>
       <div class="cell"><span>产物类型</span><strong>failed</strong></div>
     </div>
   </div>
@@ -646,6 +650,17 @@ def _artifact_base_from_output(output_path: Path) -> Path:
         if base.name.endswith(suffix):
             base = base.with_name(base.name[: -len(suffix)])
             break
+    return base
+
+
+def explicit_output_path_from_args(args) -> Path:
+    """Return an explicit artifact stem/path using CLI cwd-relative semantics."""
+    output = getattr(args, "output", None)
+    if not output:
+        return None
+    base = _artifact_base_from_output(Path(output))
+    if not base.is_absolute():
+        base = Path.cwd() / base
     return base
 
 
@@ -2355,6 +2370,23 @@ def extract_text_from_file(file_path: Path, max_chars_per_file=None, use_mineru=
     
     if max_chars_per_file is not None and len(text) > max_chars_per_file + len(header) + 4:
         return text[:max_chars_per_file + len(header) + 4] + "\n[文本过长已截断]"
+    return text
+
+
+def optional_dependency_for_extension(ext: str):
+    ext = str(ext or "").lower()
+    if ext == ".docx" and not DOCX_SUPPORTED:
+        return "python-docx", "python3 -m pip install python-docx"
+    if ext in {".xlsx", ".xlsm"} and not EXCEL_SUPPORTED:
+        return "openpyxl", "python3 -m pip install openpyxl"
+    return None, None
+
+
+def extracted_body_text(file_content: str, file_name: str = "") -> str:
+    text = str(file_content or "").strip()
+    if file_name:
+        text = re.sub(rf"^=+\s*文件:\s*{re.escape(str(file_name))}\s*=+\s*", "", text).strip()
+    text = re.sub(r"^\s*=+\s*文件:.*?=+\s*", "", text, count=1).strip()
     return text
 
 
@@ -4664,6 +4696,7 @@ def format_reference_audit_markdown(reference_audit):
     if reference_audit is None:
         return []
     lines = [
+        '<a id="reference-audit"></a>',
         "## 📚 参考文献真实性/可核验性校检",
         "",
         f"**状态**: {reference_audit.get('status', 'N/A')}",
@@ -4724,7 +4757,7 @@ def format_reference_audit_html(reference_audit):
             matches = "<li>无在线命中记录</li>"
         query = online.get("query") or build_reference_query(ref)
         cards += f"""
-        <details class="reference-card">
+        <details class="reference-card" id="reference-{idx}">
           <summary class="reference-summary">
             <span class="reference-index">#{idx}</span>
             <span class="reference-status reference-{_html_escape(status)}">{_html_escape(status_text)}</span>
@@ -4743,7 +4776,7 @@ def format_reference_audit_html(reference_audit):
     if not cards:
         cards = '<div class="muted">未发现可解析参考文献。</div>'
     return f"""
-  <div class="section reference-section">
+  <div class="section reference-section" id="reference-audit">
     <h2>参考文献真实性/可核验性校检</h2>
     <p><strong>状态</strong>: {_html_escape(reference_audit.get('status', 'N/A'))} | <strong>数量</strong>: {reference_audit.get('reference_count', 0)} | <strong>DOI</strong>: {reference_audit.get('doi_count', 0)} | <strong>年份</strong>: {reference_audit.get('year_count', 0)} | <strong>在线检索</strong>: {'启用' if reference_audit.get('online_enabled') else '未启用'}（{reference_audit.get('online_checked', 0)}条）</p>
     <p class="section-hint">{_html_escape(reference_audit.get('note', ''))}</p>
@@ -4923,6 +4956,7 @@ def format_resource_audit_markdown(resource_audit):
     if resource_audit is None:
         return []
     lines = [
+        '<a id="resource-audit"></a>',
         "## 🔗 代码仓库与在线资源可用性校检",
         "",
         f"**状态**: {resource_audit.get('status', 'N/A')}",
@@ -4979,7 +5013,7 @@ def format_resource_audit_html(resource_audit):
     else:
         body = '<p class="section-hint">未识别到代码仓库或论文部署的在线资源链接。</p>'
     return f"""
-  <div class="section resource-section">
+  <div class="section resource-section" id="resource-audit">
     <h2>代码仓库与在线资源可用性校检</h2>
     <p><strong>状态</strong>: {_html_escape(resource_audit.get('status', 'N/A'))} | <strong>数量</strong>: {resource_audit.get('resource_count', 0)} | <strong>在线检测</strong>: {'启用' if resource_audit.get('online_enabled') else '未启用'}（{resource_audit.get('online_checked', 0)}项）</p>
     <p class="section-hint">{_html_escape(resource_audit.get('note', ''))}</p>
@@ -5789,6 +5823,7 @@ def format_evidence_chain_audit_markdown(audit):
     if audit is None:
         return []
     lines = [
+        '<a id="evidence-chain"></a>',
         "## 🔗 证据链与证据簇审查",
         "",
         f"**状态**: {audit.get('status', 'N/A')}",
@@ -5799,6 +5834,7 @@ def format_evidence_chain_audit_markdown(audit):
     ]
     findings = audit.get("claim_chain_findings") or []
     if findings:
+        lines.append('<a id="evidence-chain-findings"></a>')
         lines.append("### Methods → Results → Abstract/Conclusion 链条发现")
         lines.append("")
         lines.append("| # | 级别 | 链条 | 类型 | 证据摘要 | 复核建议 |")
@@ -5821,6 +5857,7 @@ def format_evidence_chain_audit_markdown(audit):
         lines.append("")
     clusters = audit.get("clusters") or []
     if clusters:
+        lines.append('<a id="evidence-chain-clusters"></a>')
         lines.append("### 证据簇")
         lines.append("")
         lines.append("| # | 级别 | 主题 | 来源 | 证据数 | 摘要 |")
@@ -5852,7 +5889,7 @@ def format_evidence_chain_audit_html(audit):
             if part
         )
         finding_cards += f"""
-        <details class="cross-file-card evidence-chain-card">
+        <details class="cross-file-card evidence-chain-card" id="evidence-chain-finding-{idx}">
           <summary class="cross-file-summary">
             <span class="cross-file-rank">#{idx}</span>
             <span class="cross-file-severity cross-file-{_html_escape(finding.get('severity', ''))}">{_html_escape(_cross_file_severity_label(finding.get('severity')))}</span>
@@ -5871,7 +5908,7 @@ def format_evidence_chain_audit_html(audit):
             evidence_rows += f"""
             <li><strong>{_html_escape(item.get('source_type', ''))}</strong> · {_html_escape(item.get('title', ''))}<br><small>{_html_escape(item.get('detail') or item.get('excerpt') or '')}</small></li>"""
         cluster_cards += f"""
-        <details class="cross-file-card evidence-cluster-card">
+        <details class="cross-file-card evidence-cluster-card" id="evidence-chain-cluster-{idx}">
           <summary class="cross-file-summary">
             <span class="cross-file-rank">#{idx}</span>
             <span class="cross-file-severity cross-file-{_html_escape(cluster.get('severity', ''))}">{_html_escape(_cross_file_severity_label(cluster.get('severity')))}</span>
@@ -5888,13 +5925,13 @@ def format_evidence_chain_audit_html(audit):
     if not cluster_cards:
         cluster_cards = '<div class="muted">未形成明确证据簇；仍建议人工核对关键结果链条。</div>'
     return f"""
-  <div class="section cross-file-section evidence-chain-section">
+  <div class="section cross-file-section evidence-chain-section" id="evidence-chain">
     <h2>证据链与证据簇审查</h2>
     <p class="section-hint">{_html_escape(audit.get('note', ''))}</p>
     <p><strong>状态</strong>: {_html_escape(audit.get('status', 'N/A'))} | <strong>证据簇</strong>: {audit.get('cluster_count', 0)}（强 {audit.get('strong_count', 0)} / 中 {audit.get('medium_count', 0)} / 弱 {audit.get('weak_count', 0)}） | <strong>链条发现</strong>: {audit.get('finding_count', 0)}</p>
-    <h3>链条发现</h3>
+    <h3 id="evidence-chain-findings">链条发现</h3>
     {finding_cards}
-    <h3>证据簇</h3>
+    <h3 id="evidence-chain-clusters">证据簇</h3>
     {cluster_cards}
   </div>"""
 
@@ -5903,6 +5940,7 @@ def format_cross_file_consistency_markdown(audit):
     if audit is None:
         return []
     lines = [
+        '<a id="cross-file-consistency"></a>',
         "## 🧩 跨文件一致性审查",
         "",
         f"**状态**: {audit.get('status', 'N/A')}",
@@ -5937,7 +5975,7 @@ def format_cross_file_consistency_html(audit):
         cards = ""
         for idx, finding in enumerate(findings[:40], 1):
             cards += f"""
-        <details class="cross-file-card">
+        <details class="cross-file-card" id="cross-file-finding-{idx}">
           <summary class="cross-file-summary">
             <span class="cross-file-rank">#{idx}</span>
             <span class="cross-file-severity cross-file-{_html_escape(finding.get('severity', ''))}">{_html_escape(_cross_file_severity_label(finding.get('severity')))}</span>
@@ -5953,7 +5991,7 @@ def format_cross_file_consistency_html(audit):
     else:
         cards = '<div class="muted">未发现明确跨文件不一致；仍建议人工抽查关键表格、补充材料和正文结论。</div>'
     return f"""
-  <div class="section cross-file-section">
+  <div class="section cross-file-section" id="cross-file-consistency">
     <h2>跨文件一致性审查</h2>
     <p><strong>状态</strong>: {_html_escape(audit.get('status', 'N/A'))} | <strong>文件</strong>: {audit.get('checked_files', 0)} | <strong>发现</strong>: {audit.get('finding_count', 0)}（强 {audit.get('strong_count', 0)} / 中 {audit.get('medium_count', 0)} / 弱 {audit.get('weak_count', 0)}）</p>
     <p class="section-hint">{_html_escape(audit.get('note', ''))}</p>
@@ -6348,6 +6386,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
                 f"{top.get('title')}: {top.get('summary')}。优先核对 Methods、Results、图表、补充材料和现有审查信号是否指向同一证据链。",
                 220,
             ),
+            "anchor": "evidence-chain-clusters",
         })
     elif evidence_chain_audit.get("cluster_count"):
         items.append({
@@ -6355,9 +6394,10 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "证据链与证据簇审查",
             "title": f"{evidence_chain_audit.get('cluster_count')}个证据簇需复核",
             "detail": "证据簇用于把孤立疑点合并为可人工核查的问题组；建议优先查看中等以上证据簇。",
+            "anchor": "evidence-chain-clusters",
         })
     checks = sorted(report.get("checks", []) if isinstance(report, dict) else [], key=_check_sort_key)
-    for c in checks:
+    for check_idx, c in enumerate(checks, 1):
         if not _is_suspicious_check(c):
             continue
         items.append({
@@ -6365,6 +6405,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "LLM语义审查",
             "title": f"{c.get('category', 'N/A')} / {c.get('item', 'N/A')}",
             "detail": _brief_text(_check_reason(c) or _check_source_text(c) or "需人工复核。", 180),
+            "anchor": f"check-{check_idx}",
         })
     if stat_result.get("benford_status") and "高偏差" in str(stat_result.get("benford_status")):
         items.append({
@@ -6372,6 +6413,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "本地统计",
             "title": "Benford分布偏差较高",
             "detail": f"偏差={round(stat_result.get('benford_deviation') or 0, 3)}，建议核对原始数值来源和批量生成痕迹。",
+            "anchor": "local-statistics",
         })
     reference_audit = meta.get("reference_audit") or {}
     if reference_audit.get("online_enabled"):
@@ -6388,6 +6430,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
                 "source": "参考文献在线检索",
                 "title": f"{len(bad_refs)}条参考文献在线证据不足",
                 "detail": f"优先核对编号: {bad_refs[:10]}；检查DOI、题名、年份是否与数据库命中一致。",
+                "anchor": "reference-audit",
             })
     resource_audit = meta.get("resource_audit") or {}
     if resource_audit.get("issues"):
@@ -6397,6 +6440,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "资源可用性校检",
             "title": f"{len(issues)}项代码仓库/在线资源需复核",
             "detail": "优先核对不可访问、格式错误或访问受限的代码仓库、Streamlit等论文声明资源。",
+            "anchor": "resource-audit",
         })
     cross_file_audit = meta.get("cross_file_consistency_audit") or {}
     cross_findings = cross_file_audit.get("findings") or []
@@ -6409,6 +6453,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "跨文件一致性审查",
             "title": f"{len(cross_findings)}项跨文件一致性疑点",
             "detail": f"强证据冲突 {strong} 项，中等疑点 {medium} 项；优先核对正文、补充材料和数据表中的样本量/分组/图表编号。",
+            "anchor": "cross-file-consistency",
         })
     image_audit = meta.get("image_audit") or {}
     image_warnings = [img for img in image_audit.get("images", []) if img.get("risk") == "local_warning"]
@@ -6428,6 +6473,7 @@ def build_audit_action_items(report, meta, stat_result, limit=8):
             "source": "图像检测",
             "title": f"{len(image_warnings)}张本地异常 / {len(semantic_warnings)}张需语义复核 / {len(detector_warnings)}张AI概率偏高",
             "detail": "查看 image_ai_review_manifest.html 中的自动imagedetector结果，并核对图像语义分析描述是否与论文图注一致。",
+            "anchor": "image-audit",
         })
     items.sort(key=lambda item: (-item["score"], item["source"], item["title"]))
     selected = []
@@ -6458,8 +6504,11 @@ def format_audit_action_summary_markdown(report, meta, stat_result):
     lines.append("| 优先级 | 来源 | 事项 | 复核建议 |")
     lines.append("|--------|------|------|----------|")
     for idx, item in enumerate(items, 1):
+        title = item["title"]
+        if item.get("anchor"):
+            title = f"[{title}](#{item['anchor']})"
         lines.append(
-            f"| {idx} | {_md_escape_cell(item['source'])} | {_md_escape_cell(item['title'])} | "
+            f"| {idx} | {_md_escape_cell(item['source'])} | {_md_escape_cell(title)} | "
             f"{_md_escape_cell(item['detail'])} |"
         )
     lines.append("")
@@ -6473,11 +6522,14 @@ def format_audit_action_summary_html(report, meta, stat_result):
     else:
         cards = ""
         for idx, item in enumerate(items, 1):
+            title_html = _html_escape(item["title"])
+            if item.get("anchor"):
+                title_html = f'<a href="#{_html_escape(item["anchor"])}">{title_html}</a>'
             cards += f"""
             <div class="action-card">
               <span class="action-rank">#{idx}</span>
               <div>
-                <strong>{_html_escape(item['title'])}</strong>
+                <strong>{title_html}</strong>
                 <p>{_html_escape(item['detail'])}</p>
               </div>
               <span class="action-source">{_html_escape(item['source'])}</span>
@@ -6488,6 +6540,144 @@ def format_audit_action_summary_html(report, meta, stat_result):
     <h2>行动优先级摘要</h2>
     {content}
   </div>"""
+
+
+def build_review_overview(report, meta, stat_result, action_limit=3):
+    meta = meta or {}
+    report = report or {}
+    stat_result = stat_result or {}
+    breakdown = report.get("score_breakdown") or {}
+    checks = report.get("checks", []) if isinstance(report, dict) else []
+    suspicious_count = sum(1 for check in checks if _is_suspicious_check(check))
+    evidence_warnings = breakdown.get("evidence_warnings")
+    if evidence_warnings is None:
+        evidence_warnings = suspicious_count
+    extraction_warnings = breakdown.get("extraction_warnings", 0)
+    artifact_type = meta.get("artifact_type") or "complete"
+    llm_coverage = meta.get("llm_coverage") or (
+        f"{meta.get('llm_success_chunks')}/{meta.get('chunk_count')}"
+        if meta.get("chunk_count") and meta.get("llm_success_chunks") is not None
+        else "单块/未分块"
+    )
+    artifacts = meta.get("artifact_paths") or {}
+    return {
+        "report_type": artifact_type,
+        "report_type_label": "范围受限审查 (limited)" if artifact_type == "limited" else "完整审查 (complete)",
+        "risk_level": report.get("risk_level", "未知"),
+        "detection_score": report.get("detection_score", 0),
+        "red_flags": breakdown.get("red_flags", suspicious_count),
+        "evidence_warnings": evidence_warnings,
+        "extraction_warnings": extraction_warnings,
+        "p_value_warnings": stat_result.get("p_value_abnormal", 0),
+        "llm_coverage": llm_coverage,
+        "llm_failed_chunks": meta.get("llm_failed_chunks") or [],
+        "top_actions": build_audit_action_items(report, meta, stat_result, limit=action_limit),
+        "artifact_paths": artifacts,
+        "limited_reasons": meta.get("limited_reasons") or [],
+        "completed": [
+            "文本提取",
+            "本地统计",
+            "LLM语义审查",
+            *("参考文献校检" for _ in [1] if meta.get("reference_audit") is not None),
+            *("资源可用性校检" for _ in [1] if meta.get("resource_audit") is not None),
+            *("跨文件一致性审查" for _ in [1] if meta.get("cross_file_consistency_audit") is not None),
+            *("证据链审查" for _ in [1] if meta.get("evidence_chain_audit") is not None),
+            *("图像审查" for _ in [1] if meta.get("image_audit") is not None),
+        ],
+    }
+
+
+def format_review_overview_markdown(report, meta, stat_result):
+    overview = build_review_overview(report, meta, stat_result)
+    lines = [
+        '<a id="review-overview"></a>',
+        "## 复核概览",
+        "",
+        "| 项目 | 内容 |",
+        "|------|------|",
+        f"| 报告类型 | {_md_escape_cell(overview['report_type_label'])} |",
+        f"| 复核优先级 | {_md_escape_cell(overview['risk_level'])} |",
+        f"| 证据风险分 | {overview['detection_score']} / 100 |",
+        f"| 红旗/证据/提取警告 | {overview['red_flags']} / {overview['evidence_warnings']} / {overview['extraction_warnings']} |",
+        f"| LLM覆盖 | {_md_escape_cell(str(overview['llm_coverage']))} |",
+        f"| 失败分块 | {_md_escape_cell(str(overview['llm_failed_chunks'] or '无'))} |",
+    ]
+    if overview["artifact_paths"]:
+        paths = "；".join(f"{key}: {value}" for key, value in overview["artifact_paths"].items())
+        lines.append(f"| 产物路径 | {_md_escape_cell(paths)} |")
+    lines.append("")
+    if overview["top_actions"]:
+        lines.append("**Top 3 复核动作**")
+        lines.append("")
+        for idx, item in enumerate(overview["top_actions"], 1):
+            title = item["title"]
+            if item.get("anchor"):
+                title = f"[{title}](#{item['anchor']})"
+            lines.append(f"{idx}. {title} - {item['detail']}")
+        lines.append("")
+    if overview["report_type"] == "limited":
+        lines.append('<a id="limitation-panel"></a>')
+        lines.append("### 范围限制面板")
+        lines.append("")
+        lines.append("**限制原因**: " + ("；".join(overview["limited_reasons"]) if overview["limited_reasons"] else "未记录具体限制原因"))
+        lines.append("")
+        lines.append("**已完成**: " + "；".join(overview["completed"]))
+        lines.append("")
+    return lines
+
+
+def format_review_overview_html(report, meta, stat_result):
+    overview = build_review_overview(report, meta, stat_result)
+    actions = ""
+    for idx, item in enumerate(overview["top_actions"], 1):
+        title = _html_escape(item["title"])
+        if item.get("anchor"):
+            title = f'<a href="#{_html_escape(item["anchor"])}">{title}</a>'
+        actions += f"""
+        <li><span>#{idx}</span><strong>{title}</strong><p>{_html_escape(item.get('detail', ''))}</p></li>"""
+    if not actions:
+        actions = "<li><strong>暂无高优先级动作</strong><p>建议按报告章节抽查原文、图表和引用。</p></li>"
+    artifacts = ""
+    for key, value in (overview.get("artifact_paths") or {}).items():
+        artifacts += f"<li><strong>{_html_escape(key)}</strong>: {_html_escape(value)}</li>"
+    if not artifacts:
+        artifacts = "<li>最终产物路径将在写入后记录。</li>"
+    limitation_panel = ""
+    if overview["report_type"] == "limited":
+        reasons = overview["limited_reasons"] or ["未记录具体限制原因"]
+        reason_items = "".join(f"<li>{_html_escape(reason)}</li>" for reason in reasons)
+        completed_items = "".join(f"<li>{_html_escape(item)}</li>" for item in overview["completed"])
+        limitation_panel = f"""
+  <div class="section limitation-panel" id="limitation-panel">
+    <h2>范围限制面板</h2>
+    <div class="limitation-grid">
+      <div><strong>限制来源</strong><ul>{reason_items}</ul></div>
+      <div><strong>已完成审查</strong><ul>{completed_items}</ul></div>
+    </div>
+  </div>"""
+    return f"""
+  <div class="section review-overview" id="review-overview">
+    <h2>复核概览</h2>
+    <div class="overview-grid">
+      <div><span>报告类型</span><strong>{_html_escape(overview['report_type_label'])}</strong></div>
+      <div><span>复核优先级</span><strong>{_html_escape(overview['risk_level'])}</strong></div>
+      <div><span>证据风险分</span><strong>{overview['detection_score']} / 100</strong></div>
+      <div><span>红旗 / 证据警告 / 提取警告</span><strong>{overview['red_flags']} / {overview['evidence_warnings']} / {overview['extraction_warnings']}</strong></div>
+      <div><span>LLM覆盖</span><strong>{_html_escape(overview['llm_coverage'])}</strong></div>
+      <div><span>失败分块</span><strong>{_html_escape(overview['llm_failed_chunks'] or '无')}</strong></div>
+    </div>
+    <div class="overview-columns">
+      <div>
+        <h3>Top 3 复核动作</h3>
+        <ol class="overview-actions">{actions}</ol>
+      </div>
+      <div>
+        <h3>产物路径</h3>
+        <ul class="artifact-list">{artifacts}</ul>
+      </div>
+    </div>
+  </div>
+  {limitation_panel}"""
 
 
 def _report_action_context(report, pdf_path, meta, stat_result):
@@ -6912,8 +7102,13 @@ def format_report(report, pdf_path, meta, stat_result):
     lines.append(f"**审查时间**: {runtime.get('local_time') or time.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"**运行时UTC年份**: {runtime.get('utc_year', runtime_utc_year())}（用于未来发表年份等非LLM日期判断）")
 
+    if not report.get("parse_error"):
+        lines.extend([""])
+        lines.extend(format_review_overview_markdown(report, meta, stat_result))
+
     lines.extend([
         f"",
+        f'<a id="local-statistics"></a>',
         f"## 📊 本地统计检测结果",
         f"| 检测项 | 结果 | 状态 |",
         f"|--------|------|------|",
@@ -6952,6 +7147,7 @@ def format_report(report, pdf_path, meta, stat_result):
     checks = sorted(report.get("checks", []), key=_check_sort_key)
     if checks:
         suspicious = [c for c in checks if _is_suspicious_check(c)]
+        lines.append('<a id="suspicious-findings"></a>')
         lines.append("## 🚩 可疑点证据汇总表")
         lines.append("")
         if suspicious:
@@ -6971,6 +7167,7 @@ def format_report(report, pdf_path, meta, stat_result):
             lines.append("> 未发现红旗/疑点项；仍建议人工核验关键数据、图表和引用。")
         lines.append("")
 
+        lines.append('<a id="all-checks"></a>')
         lines.append("## 🔍 全部检查项概览")
         lines.append("")
         lines.append("| # | 分类 | 检查项 | 判定 | 证据摘要 |")
@@ -6979,9 +7176,11 @@ def format_report(report, pdf_path, meta, stat_result):
             lines.append(f"| {i} | {_md_escape_cell(c.get('category', 'N/A'))} | {_md_escape_cell(c.get('item', 'N/A'))} | {_md_escape_cell(c.get('verdict', 'N/A'))} | {_md_escape_cell(_brief_text(_check_source_text(c), 120) or '-')} |")
         lines.append("")
 
+        lines.append('<a id="finding-details"></a>')
         lines.append("## 📋 逐条详细分析（含原文支撑）")
         lines.append("")
         for i, c in enumerate(checks, 1):
+            lines.append(f'<a id="check-{i}"></a>')
             lines.append(f"### {i}. {c.get('category', 'N/A')} - {c.get('item', 'N/A')} — {c.get('verdict', 'N/A')}")
             source = _check_source_text(c)
             reason = _check_reason(c)
@@ -7075,6 +7274,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
     <p>{_html_escape(meta.get('llm_coverage'))} 个分块全部成功。</p>
   </div>"""
     action_summary_html = format_audit_action_summary_html(report, meta, stat_result) if not report.get("parse_error") else ""
+    review_overview_html = format_review_overview_html(report, meta, stat_result) if not report.get("parse_error") else ""
     resource_audit_html = format_resource_audit_html(meta.get("resource_audit"))
     reference_audit_html = format_reference_audit_html(meta.get("reference_audit"))
     image_audit_html = format_image_audit_html(meta.get("image_audit"))
@@ -7117,7 +7317,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
             source_tags = " + ".join(_check_source_tags(c))
             merged_html = _merged_group_html(c)
             suspicious_items += f"""
-            <details class="suspicion-card">
+            <details class="suspicion-card" id="suspicious-finding-{i}">
                 <summary class="suspicion-summary">
                     <span class="suspicion-rank">#{i}</span>
                     <span class="{verdict_class} suspicion-verdict">{_html_escape(verdict)}</span>
@@ -7159,7 +7359,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
             source_html = render_evidence_html(source or 'LLM未提供明确原文摘录，请人工回查对应段落。')
             merged_html = _merged_group_html(c)
             detail_cards += f"""
-            <details class="detail-card">
+            <details class="detail-card" id="check-{i}">
                 <summary class="detail-header detail-summary">
                     <span class="detail-num">#{i}</span>
                     <span class="detail-cat">{_html_escape(c.get('category', 'N/A'))}</span>
@@ -7176,19 +7376,19 @@ def format_html_report(report, pdf_path, meta, stat_result):
             </details>"""
 
         checks_html = f"""
-        <div class="section evidence-summary">
+        <div class="section evidence-summary" id="suspicious-findings">
             <h2>Top 可复核证据</h2>
             <p class="section-hint">按可复核性和证据强度排序；默认显示前5项，展开后查看原文证据、判断理由和相近疑点统合来源。</p>
             <div class="suspicion-list">{suspicious_items}</div>
         </div>
-        <div class="section">
+        <div class="section" id="all-checks">
             <h2>全部检查项概览</h2>
             <table class="checks-table">
                 <thead><tr><th>#</th><th>分类</th><th>检查项</th><th>判定</th><th>证据摘要</th></tr></thead>
                 <tbody>{checks_table_rows}</tbody>
             </table>
         </div>
-        <div class="section">
+        <div class="section" id="finding-details">
             <h2>逐条详细分析（含原文支撑）</h2>
             {detail_cards}
         </div>"""
@@ -7406,10 +7606,66 @@ def format_html_report(report, pdf_path, meta, stat_result):
     margin-top: 4px;
     font-size: 13px;
   }}
+  .action-card a, .review-overview a {{
+    color: var(--accent);
+    text-decoration: none;
+  }}
   .action-source {{
     color: var(--text-muted);
     font-size: 12px;
     text-align: right;
+  }}
+  .review-overview {{
+    border-left: 5px solid var(--accent2);
+  }}
+  .overview-grid {{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }}
+  .overview-grid div {{
+    border: 1px solid var(--border);
+    background: #fff8ed;
+    border-radius: 6px;
+    padding: 10px;
+  }}
+  .overview-grid span {{
+    display: block;
+    color: var(--text-muted);
+    font-size: 12px;
+  }}
+  .overview-grid strong {{
+    display: block;
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+  }}
+  .overview-columns, .limitation-grid {{
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 18px;
+  }}
+  .overview-actions {{
+    padding-left: 22px;
+  }}
+  .overview-actions li {{
+    margin-bottom: 10px;
+  }}
+  .overview-actions li span {{
+    color: var(--text-muted);
+    font-weight: 800;
+    margin-right: 6px;
+  }}
+  .overview-actions p, .artifact-list {{
+    color: var(--text-muted);
+    font-size: 13px;
+  }}
+  .artifact-list {{
+    padding-left: 18px;
+    overflow-wrap: anywhere;
+  }}
+  .limitation-panel {{
+    border-left: 5px solid var(--yellow);
   }}
   .checks-table {{ table-layout: fixed; }}
   .checks-table th:nth-child(1), .checks-table td:nth-child(1) {{ width: 44px; text-align: center; }}
@@ -8089,6 +8345,8 @@ def format_html_report(report, pdf_path, meta, stat_result):
     .report-topline {{ flex-direction: column; }}
     .score-panel {{ grid-template-columns: 1fr; }}
     .meta-grid {{ grid-template-columns: 1fr 1fr; }}
+    .overview-grid {{ grid-template-columns: 1fr 1fr; }}
+    .overview-columns, .limitation-grid {{ grid-template-columns: 1fr; }}
     .suspicion-summary, .reference-summary {{
       grid-template-columns: 40px minmax(70px, 100px) 1fr;
     }}
@@ -8102,6 +8360,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
   }}
   @media (max-width: 560px) {{
     .meta-grid {{ grid-template-columns: 1fr; }}
+    .overview-grid {{ grid-template-columns: 1fr; }}
     .checks-table {{ table-layout: auto; }}
   }}
 </style>
@@ -8144,11 +8403,12 @@ def format_html_report(report, pdf_path, meta, stat_result):
     </div>
   </div>
 
+  {review_overview_html}
   {coverage_banner}
   {limited_notice}
   {action_summary_html}
 
-  <div class="section">
+  <div class="section" id="local-statistics">
     <h2>本地统计检测结果</h2>
     <table>
       <thead><tr><th>检测项</th><th>结果</th><th>状态</th></tr></thead>
@@ -9218,7 +9478,7 @@ def format_image_audit_html(image_audit):
     if not rows:
         rows = '<tr><td colspan="8" class="muted">未发现可检测图片。</td></tr>'
     return f"""
-  <div class="section image-section">
+  <div class="section image-section" id="image-audit">
     <h2>图像AI/合理性检测</h2>
     <p class="section-hint">{_html_escape(image_audit.get('note', ''))}</p>
     <p><strong>检测网站</strong>: <a href="{IMAGE_DETECT_URL}" target="_blank" rel="noopener">{IMAGE_DETECT_URL}</a> | <strong>图片</strong>: {image_audit.get('checked_count', 0)} / {image_audit.get('image_count', 0)} | <strong>语义模型</strong>: {_html_escape(image_audit.get('semantic_model', 'N/A'))}（{image_audit.get('semantic_checked', 0)}张） | <strong>imagedetector</strong>: {image_audit.get('detector_checked', 0)}张</p>
@@ -9233,6 +9493,7 @@ def format_image_audit_markdown(image_audit):
     if not image_audit:
         return []
     lines = [
+        '<a id="image-audit"></a>',
         "## 🖼️ 图像AI/合理性检测",
         "",
         f"**检测网站**: {image_audit.get('site', IMAGE_DETECT_URL)}",
@@ -9495,12 +9756,9 @@ def launch_image_ai_detect(
 
 
 def _failed_artifact_options(input_path: Path, output_dir: Path, args) -> Dict[str, Any]:
-    if not getattr(args, "output", None):
+    base = explicit_output_path_from_args(args)
+    if base is None:
         return {}
-    output_override = Path(args.output)
-    if not output_override.is_absolute():
-        output_override = Path(output_dir) / output_override
-    base = _artifact_base_from_output(output_override)
     return {"output_dir": base.parent, "output_stem": base.name}
 
 
@@ -9563,6 +9821,44 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
     use_mineru_default = has_pdf_input and not args.no_mineru
     if use_mineru_default and not args.mineru:
         print("📡 检测到PDF输入，默认启用MinerU提取；如需原始PDF文本提取请使用 --no-mineru")
+
+    output_override_preview = explicit_output_path_from_args(args)
+    preview_md, preview_html, preview_json = audit_artifact_paths(input_path, output_path=output_override_preview)
+    if input_path.is_dir():
+        extraction_route = "directory_multi_format"
+    elif input_path.suffix.lower() == ".pdf":
+        extraction_route = "mineru_pdf" if use_mineru_default else "raw_pdf_stream"
+    elif input_path.suffix.lower() == ".docx":
+        extraction_route = "direct_docx"
+    elif input_path.suffix.lower() in {".xlsx", ".xlsm", ".csv"}:
+        extraction_route = "spreadsheet_text"
+    else:
+        extraction_route = f"{input_path.suffix.lower().lstrip('.') or 'file'}_text"
+    scope_flags = []
+    for attr, label in (
+        ("no_mineru", "--no-mineru"),
+        ("no_reference_online", "--no-reference-online"),
+        ("no_image_semantic", "--no-image-semantic"),
+        ("no_image_detector", "--no-image-detector"),
+        ("llm_cache_only", "--llm-cache-only"),
+    ):
+        if getattr(args, attr, False):
+            scope_flags.append(label)
+    for attr, label in (
+        ("reference_online_limit", "--reference-online-limit"),
+        ("image_audit_limit", "--image-audit-limit"),
+        ("image_semantic_limit", "--image-semantic-limit"),
+        ("image_detector_limit", "--image-detector-limit"),
+    ):
+        if getattr(args, attr, None) is not None:
+            scope_flags.append(f"{label}={getattr(args, attr)}")
+    print("🧭 运行摘要:")
+    print(f"  - 输入: {input_path} ({'目录' if input_path.is_dir() else '单文件'})")
+    print(f"  - 提取路线: {extraction_route}")
+    print(f"  - 输出目录/产物: {preview_md.parent} / {preview_md.stem}")
+    print(f"  - HTML/JSON预期: {preview_html.name} / {preview_json.name}")
+    print(f"  - 断点续作缓存: {resume_dir}")
+    print(f"  - 范围限制开关: {', '.join(scope_flags) if scope_flags else '无，默认尝试完整审查'}")
 
     resume_event(resume_dir, "init", "done", f"input={input_path}; llm={LLM_MODEL}; url={LLM_API_URL}; max_chars={args.max_chars}; use_mineru={use_mineru_default}")
     record_run_workspace_json(run_workspace, "cache_use.json", {
@@ -9674,10 +9970,70 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
         for idx, file_path in enumerate(audit_files, 1):
             print(f"  📝 提取主体文件 [{idx}/{total_files}] {file_path.name}...")
             progress_bar(idx - 1, max(total_files, 1), f"阶段1/5 提取主体文件: {file_path.name}")
+            dependency, install_command = optional_dependency_for_extension(file_path.suffix)
+            if dependency:
+                failure = AuditFailure(
+                    capability="input_extraction",
+                    error_class="missing_optional_dependency",
+                    message=f"目录审查中的审查相关文件 {file_path.name} 需要安装可选依赖 {dependency}。",
+                    fix_hints=[f"运行 `{install_command}` 后重试。", "或转换该文件为 PDF/文本格式后重新运行审查。"],
+                    completed_stages=completed_stages,
+                    retry_command=retry_command,
+                    details={
+                        "file": str(file_path),
+                        "extension": file_path.suffix.lower(),
+                        "dependency": dependency,
+                        "install_command": install_command,
+                        "resume_dir": str(resume_dir),
+                    },
+                )
+                md_path, json_path = save_failed_audit_diagnostics(
+                    failure,
+                    input_path,
+                    **failed_artifact_kwargs,
+                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
+                )
+                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
+                return RunResult.failed(
+                    failure,
+                    {"markdown": str(md_path), "json": str(json_path)},
+                    workspace=run_workspace,
+                    meta={"input_path": str(input_path)},
+                )
             file_content = extract_text_from_file(file_path, max_chars_per_file=None,
                                                   use_mineru=use_mineru,
                                                   mineru_lang=args.mineru_lang,
                                                   output_dir=output_dir)
+            body_text = extracted_body_text(file_content, file_path.name)
+            if not body_text or body_text.startswith("[文件解析失败:"):
+                failure = AuditFailure(
+                    capability="input_extraction",
+                    error_class="no_extractable_text",
+                    message=f"未能从目录审查相关文件 {file_path.name} 提取到可审查文本。",
+                    fix_hints=["检查文件是否为空、损坏、加密或需要额外依赖。", "转换该文件为 PDF/文本格式后重试，或在未来显式排除该文件。"],
+                    completed_stages=completed_stages,
+                    retry_command=retry_command,
+                    details={
+                        "file": str(file_path),
+                        "extension": file_path.suffix.lower(),
+                        "category": _file_audit_category(file_path),
+                        "extract_preview": _brief_text(file_content, 240),
+                        "resume_dir": str(resume_dir),
+                    },
+                )
+                md_path, json_path = save_failed_audit_diagnostics(
+                    failure,
+                    input_path,
+                    **failed_artifact_kwargs,
+                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
+                )
+                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
+                return RunResult.failed(
+                    failure,
+                    {"markdown": str(md_path), "json": str(json_path)},
+                    workspace=run_workspace,
+                    meta={"input_path": str(input_path)},
+                )
             try:
                 rel_path = str(file_path.relative_to(input_path))
             except Exception:
@@ -9694,10 +10050,64 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
 
         for idx, file_path in enumerate(file_classes.get("references") or [], 1):
             print(f"  📚 提取参考文献文件 [{idx}/{len(reference_file_set)}] {file_path.name}...")
-            reference_file_texts.append(extract_text_from_file(file_path, max_chars_per_file=None,
-                                                               use_mineru=use_mineru,
-                                                               mineru_lang=args.mineru_lang,
-                                                               output_dir=output_dir))
+            dependency, install_command = optional_dependency_for_extension(file_path.suffix)
+            if dependency:
+                failure = AuditFailure(
+                    capability="input_extraction",
+                    error_class="missing_optional_dependency",
+                    message=f"目录审查中的参考文献文件 {file_path.name} 需要安装可选依赖 {dependency}。",
+                    fix_hints=[f"运行 `{install_command}` 后重试。", "或转换该文件为 PDF/文本格式后重新运行审查。"],
+                    completed_stages=completed_stages,
+                    retry_command=retry_command,
+                    details={
+                        "file": str(file_path),
+                        "extension": file_path.suffix.lower(),
+                        "dependency": dependency,
+                        "install_command": install_command,
+                        "resume_dir": str(resume_dir),
+                    },
+                )
+                md_path, json_path = save_failed_audit_diagnostics(
+                    failure,
+                    input_path,
+                    **failed_artifact_kwargs,
+                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
+                )
+                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
+                return RunResult.failed(
+                    failure,
+                    {"markdown": str(md_path), "json": str(json_path)},
+                    workspace=run_workspace,
+                    meta={"input_path": str(input_path)},
+                )
+            reference_content = extract_text_from_file(file_path, max_chars_per_file=None,
+                                                       use_mineru=use_mineru,
+                                                       mineru_lang=args.mineru_lang,
+                                                       output_dir=output_dir)
+            if not extracted_body_text(reference_content, file_path.name):
+                failure = AuditFailure(
+                    capability="input_extraction",
+                    error_class="no_extractable_text",
+                    message=f"未能从目录审查相关参考文献文件 {file_path.name} 提取到可审查文本。",
+                    fix_hints=["检查文件是否为空、损坏、加密或需要额外依赖。", "转换该文件为 PDF/文本格式后重试。"],
+                    completed_stages=completed_stages,
+                    retry_command=retry_command,
+                    details={"file": str(file_path), "extension": file_path.suffix.lower(), "resume_dir": str(resume_dir)},
+                )
+                md_path, json_path = save_failed_audit_diagnostics(
+                    failure,
+                    input_path,
+                    **failed_artifact_kwargs,
+                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
+                )
+                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
+                return RunResult.failed(
+                    failure,
+                    {"markdown": str(md_path), "json": str(json_path)},
+                    workspace=run_workspace,
+                    meta={"input_path": str(input_path)},
+                )
+            reference_file_texts.append(reference_content)
         
         def _class_count(v):
             if v is None:
@@ -9762,14 +10172,15 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                 single_suffix in {".xlsx", ".xlsm"} and not EXCEL_SUPPORTED
             )
             if missing_dependency:
-                dependency = "python-docx" if single_suffix == ".docx" else "openpyxl"
+                dependency, install_command = optional_dependency_for_extension(single_suffix)
                 failure = AuditFailure(
                     capability="input_extraction",
                     error_class="missing_optional_dependency",
                     message=f"读取 {single_suffix} 文件需要安装可选依赖 {dependency}。",
-                    fix_hints=[f"安装 {dependency} 后重试。", "或转换为 PDF 后重新运行审查。"],
+                    fix_hints=[f"运行 `{install_command}` 后重试。", "或转换为 PDF 后重新运行审查。"],
                     completed_stages=completed_stages,
                     retry_command=retry_command,
+                    details={"dependency": dependency, "install_command": install_command, "resume_dir": str(resume_dir)},
                 )
                 md_path, json_path = save_failed_audit_diagnostics(failure, input_path, **failed_artifact_kwargs)
                 record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
@@ -9787,7 +10198,7 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
                 mineru_lang=args.mineru_lang,
                 output_dir=output_dir,
             )
-            body_text = re.sub(rf"^=+\s*文件:\s*{re.escape(pdf_path.name)}\s*=+", "", full_text.strip()).strip()
+            body_text = extracted_body_text(full_text, pdf_path.name)
             if not body_text:
                 failure = AuditFailure(
                     capability="input_extraction",
@@ -10318,11 +10729,7 @@ def run_audit(run_request: RunRequest, args) -> RunResult:
         "auto_start": not bool(getattr(args, "no_open", False)),
     }
     # 确定输出路径（优先HTML）
-    output_override = None
-    if args.output:
-        output_override = Path(args.output)
-        if not output_override.is_absolute():
-            output_override = output_dir / output_override
+    output_override = explicit_output_path_from_args(args)
     output_path, html_output_path, json_path = audit_artifact_paths(
         input_path,
         artifact_type=meta.get("artifact_type", "complete"),

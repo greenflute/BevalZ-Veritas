@@ -463,6 +463,34 @@ def test_run_audit_accepts_direct_docx_file_input(monkeypatch, tmp_path):
     assert payload["meta"]["extraction_method"] == "docx_text"
 
 
+def test_run_audit_rejects_directory_audit_docx_when_dependency_missing(monkeypatch, tmp_path):
+    input_dir = tmp_path / "paper_dir"
+    input_dir.mkdir()
+    docx_path = input_dir / "manuscript.docx"
+    docx_path.write_bytes(b"fake-docx")
+    output_base = tmp_path / "dir_report"
+    args = _minimal_run_args(input_dir, output_base)
+
+    def fail_extract(*args, **kwargs):
+        raise AssertionError("missing dependency should fail before extraction")
+
+    monkeypatch.setattr(paper_audit, "DOCX_SUPPORTED", False)
+    monkeypatch.setattr(paper_audit, "extract_text_from_file", fail_extract)
+
+    result = paper_audit.run_audit(paper_audit.RunRequest.from_args(args), args)
+
+    assert result.outcome == "failed"
+    failed_json = tmp_path / "dir_report.failed.json"
+    failed_md = tmp_path / "dir_report.failed.md"
+    assert failed_json.exists()
+    assert failed_md.exists()
+    payload = json.loads(failed_json.read_text(encoding="utf-8"))
+    assert payload["failure"]["capability"] == "input_extraction"
+    assert payload["failure"]["error_class"] == "missing_optional_dependency"
+    assert payload["failure"]["details"]["dependency"] == "python-docx"
+    assert "python3 -m pip install python-docx" in failed_md.read_text(encoding="utf-8")
+
+
 def test_run_audit_rejects_direct_legacy_doc_file_input(monkeypatch, tmp_path):
     doc_path = tmp_path / "paper.doc"
     doc_path.write_bytes(b"legacy-doc")
@@ -1555,8 +1583,9 @@ def test_retry_command_from_args_preserves_resume_scope():
     assert "--fresh" not in command
 
 
-def test_failed_artifact_options_uses_output_prefix(tmp_path):
+def test_failed_artifact_options_uses_output_prefix(monkeypatch, tmp_path):
     args = types.SimpleNamespace(output="full_risk_from_scratch.md")
+    monkeypatch.chdir(tmp_path)
 
     options = paper_audit._failed_artifact_options(tmp_path / "paper_dir", tmp_path, args)
     failure = paper_audit.AuditFailure(
@@ -2717,6 +2746,24 @@ def test_audit_artifact_paths_normalize_explicit_output(tmp_path):
     assert json_path == tmp_path / "custom.limited.json"
 
 
+def test_explicit_relative_output_paths_are_cwd_relative(monkeypatch, tmp_path):
+    args = types.SimpleNamespace(output="Test_paper2/test_paper2_audit")
+    monkeypatch.chdir(tmp_path)
+
+    output_base = paper_audit.explicit_output_path_from_args(args)
+    md_path, html_path, json_path = paper_audit.audit_artifact_paths(
+        Path("Test_paper2"),
+        artifact_type="complete",
+        output_path=output_base,
+    )
+    failed_kwargs = paper_audit._failed_artifact_options(Path("Test_paper2"), Path("Test_paper2"), args)
+
+    assert md_path == tmp_path / "Test_paper2/test_paper2_audit.audit.md"
+    assert html_path == tmp_path / "Test_paper2/test_paper2_audit.audit.html"
+    assert json_path == tmp_path / "Test_paper2/test_paper2_audit.audit.json"
+    assert failed_kwargs == {"output_dir": tmp_path / "Test_paper2", "output_stem": "test_paper2_audit"}
+
+
 def test_audit_resources_extracts_and_checks_code_and_deployed_urls(monkeypatch):
     text = (
         "Code available at https://github.com/2951121599/streamlit\\_PTC2. "
@@ -2908,6 +2955,76 @@ def test_report_headers_state_complete_or_limited(tmp_path):
     assert "用户关闭参考文献在线核验" in limited
 
 
+def test_reports_include_review_overview_and_internal_evidence_links(tmp_path):
+    stat = {
+        "benford_deviation": None,
+        "benford_status": None,
+        "p_value_count": 0,
+        "p_value_abnormal": 0,
+        "sd_count": 0,
+        "number_count": 0,
+    }
+    report = {
+        "summary": "needs review",
+        "risk_level": "中",
+        "detection_score": 62,
+        "score_breakdown": {"red_flags": 1, "evidence_warnings": 1, "extraction_warnings": 0},
+        "checks": [
+            {
+                "category": "数据与结果",
+                "item": "样本量",
+                "verdict": "⚠️可疑",
+                "source_text": "Methods n=42, Results n=24",
+                "reason": "样本量前后不一致",
+            }
+        ],
+        "conclusion": "manual review required",
+    }
+    meta = {
+        "artifact_type": "complete",
+        "artifact_paths": {
+            "markdown": str(tmp_path / "paper.audit.md"),
+            "html": str(tmp_path / "paper.audit.html"),
+            "json": str(tmp_path / "paper.audit.json"),
+        },
+    }
+
+    markdown = paper_audit.format_report(report, tmp_path / "paper.pdf", meta, stat)
+    html = paper_audit.format_html_report(report, tmp_path / "paper.pdf", meta, stat)
+
+    assert "## 复核概览" in markdown
+    assert "| 报告类型 | 完整审查 (complete) |" in markdown
+    assert "[数据与结果 / 样本量](#check-1)" in markdown
+    assert 'id="review-overview"' in html
+    assert 'href="#check-1"' in html
+    assert 'id="check-1"' in html
+
+
+def test_limited_report_includes_limitation_panel(tmp_path):
+    stat = {
+        "benford_deviation": None,
+        "benford_status": None,
+        "p_value_count": 0,
+        "p_value_abnormal": 0,
+        "sd_count": 0,
+        "number_count": 0,
+    }
+    report = {"summary": "ok", "risk_level": "低", "detection_score": 0, "checks": [], "conclusion": "ok"}
+    meta = {
+        "artifact_type": "limited",
+        "limited_reasons": ["用户关闭参考文献在线核验。"],
+        "reference_audit": {"status": "skipped"},
+    }
+
+    markdown = paper_audit.format_report(report, tmp_path / "paper.pdf", meta, stat)
+    html = paper_audit.format_html_report(report, tmp_path / "paper.pdf", meta, stat)
+
+    assert "### 范围限制面板" in markdown
+    assert "用户关闭参考文献在线核验" in markdown
+    assert 'id="limitation-panel"' in html
+    assert "已完成审查" in html
+
+
 def test_failed_audit_markdown_includes_required_diagnostics(tmp_path):
     failure = paper_audit.AuditFailure(
         capability="mineru",
@@ -2923,6 +3040,7 @@ def test_failed_audit_markdown_includes_required_diagnostics(tmp_path):
     rendered = paper_audit.format_failed_audit_markdown(failure, tmp_path / "sample.pdf")
 
     assert "未生成完整审查报告" in rendered
+    assert "## 失败恢复面板" in rendered
     assert "**完整审查报告已生成**: 否" in rendered
     assert "`mineru`" in rendered
     assert "`missing_required_config`" in rendered
@@ -2930,6 +3048,27 @@ def test_failed_audit_markdown_includes_required_diagnostics(tmp_path):
     assert "runtime_config_loaded" in rendered
     assert "python paper_audit.py sample.pdf --json" in rendered
     assert '"field": "MINERU_TOKEN"' in rendered
+
+
+def test_failed_audit_html_uses_recovery_panel_without_risk_overview(tmp_path):
+    failure = paper_audit.AuditFailure(
+        capability="input_extraction",
+        error_class="missing_optional_dependency",
+        message="读取 .docx 文件需要安装可选依赖 python-docx。",
+        fix_hints=["运行 `python3 -m pip install python-docx` 后重试。"],
+        completed_stages=["init"],
+        retry_command="python paper_audit.py paper.docx --json",
+        details={"resume_dir": str(tmp_path / ".paper.paper_audit_resume")},
+        created_at="2026-05-28 12:00:00",
+    )
+
+    rendered = paper_audit.format_failed_audit_html(failure, tmp_path / "paper.docx")
+
+    assert "失败恢复面板" in rendered
+    assert 'id="failed-diagnostics"' in rendered
+    assert "python3 -m pip install python-docx" in rendered
+    assert "复核优先级" not in rendered
+    assert "证据风险分" not in rendered
 
 
 def test_failed_audit_payload_serializes_stable_shape(tmp_path):
