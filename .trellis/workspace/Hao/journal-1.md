@@ -369,3 +369,36 @@ Added a drag-and-drop input zone to the Web Runner so users can drop a file or d
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Web Runner Path Selection
+
+**Date**: 2026-06-05
+**Task**: Web Runner Path Selection
+**Branch**: `main`
+
+### Summary
+
+Added readonly Web Runner path fields, local picker buttons, default timestamped output stems, and backend fallback output creation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2a1da6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

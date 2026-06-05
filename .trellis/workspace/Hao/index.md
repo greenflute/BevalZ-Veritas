@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-06-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~371 | Active |
+| `journal-1.md` | ~404 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-06-05 | Web Runner Path Selection | `f2a1da6` | `main` |
 | 11 | 2026-06-05 | Web Runner Drag Drop | `180a188` | `main` |
 | 10 | 2026-06-05 | Local Web Runner | `893c495` | `main` |
 | 9 | 2026-06-04 | Improve audit usability and report presentation | `d6a7ded`, `08efaa5` | `main` |
