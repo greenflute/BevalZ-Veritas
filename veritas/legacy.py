@@ -3024,6 +3024,43 @@ def open_html_artifact(html_path: Path):
     webbrowser.open(f"file:///{html_abs}" if platform.system() == "Windows" else f"file://{html_abs}")
 
 
+def _report_action_api_response(route, payload):
+    """Return the shared response payload for local report action endpoints."""
+    context = payload.get("context") or {}
+    language = normalize_followup_language(payload.get("language"))
+    if route == "/followups":
+        return load_existing_followups(context, language=language)
+    kind = payload.get("kind")
+    result = generate_and_save_followup_draft(
+        kind,
+        context,
+        language=language,
+        identity=payload.get("identity"),
+        selected_issues=payload.get("selected_issues"),
+        custom_concerns=payload.get("custom_concerns"),
+        tone=payload.get("tone"),
+        disclaimer_confirmed=bool(payload.get("disclaimer_confirmed")),
+        timeout=LLM_TIMEOUT,
+    )
+    return {
+        "ok": True,
+        "kind": result.get("kind"),
+        "language": result.get("language"),
+        "tone": result.get("tone"),
+        "model": result.get("model"),
+        "text": result.get("text"),
+        "paths": result.get("paths"),
+    }
+
+
+def _read_json_request_body(handler, max_bytes=2_000_000):
+    length = int(handler.headers.get("Content-Length", "0") or "0")
+    if length > max_bytes:
+        raise ValueError("request_too_large")
+    body = handler.rfile.read(length).decode("utf-8", errors="replace")
+    return json.loads(body or "{}")
+
+
 def serve_report_actions(host="127.0.0.1", port=8765):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -3056,38 +3093,11 @@ def serve_report_actions(host="127.0.0.1", port=8765):
                 self._send_json({"ok": False, "error": "not_found"}, 404)
                 return
             try:
-                length = int(self.headers.get("Content-Length", "0") or "0")
-                if length > 2_000_000:
-                    self._send_json({"ok": False, "error": "request_too_large"}, 413)
-                    return
-                body = self.rfile.read(length).decode("utf-8", errors="replace")
-                payload = json.loads(body or "{}")
-                context = payload.get("context") or {}
-                language = normalize_followup_language(payload.get("language"))
-                if route == "/followups":
-                    self._send_json(load_existing_followups(context, language=language))
-                    return
-                kind = payload.get("kind")
-                result = generate_and_save_followup_draft(
-                    kind,
-                    context,
-                    language=language,
-                    identity=payload.get("identity"),
-                    selected_issues=payload.get("selected_issues"),
-                    custom_concerns=payload.get("custom_concerns"),
-                    tone=payload.get("tone"),
-                    disclaimer_confirmed=bool(payload.get("disclaimer_confirmed")),
-                    timeout=LLM_TIMEOUT,
-                )
-                self._send_json({
-                    "ok": True,
-                    "kind": result.get("kind"),
-                    "language": result.get("language"),
-                    "tone": result.get("tone"),
-                    "model": result.get("model"),
-                    "text": result.get("text"),
-                    "paths": result.get("paths"),
-                })
+                payload = _read_json_request_body(self)
+                self._send_json(_report_action_api_response(route, payload))
+            except ValueError as e:
+                status = 413 if str(e) == "request_too_large" else 400
+                self._send_json({"ok": False, "error": str(e)}, status)
             except Exception as e:
                 self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
 
@@ -3101,6 +3111,661 @@ def serve_report_actions(host="127.0.0.1", port=8765):
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n⏹️ 报告动作服务已停止")
+    finally:
+        httpd.server_close()
+    return 0
+
+
+def _web_runner_now():
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _web_runner_history_path(path=None):
+    return Path(path) if path else Path(".veritas_web") / "runs.json"
+
+
+def _web_runner_output_base(output):
+    if not output:
+        return None
+    base = _artifact_base_from_output(Path(output))
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    return base
+
+
+def _web_runner_run_id(input_path):
+    seed = f"{time.time()}:{input_path}:{os.getpid()}"
+    return f"{time.strftime('%Y%m%d-%H%M%S')}-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:8]}"
+
+
+def _web_runner_safe_run(run):
+    public = dict(run or {})
+    public.pop("_process", None)
+    public.pop("_cancel_requested", None)
+    return public
+
+
+def _web_runner_capability_status(config, capability_name, errors):
+    capability = getattr(config, capability_name)
+    missing = [e for e in errors if e.get("capability") == capability.name]
+    payload = {
+        "name": capability.name,
+        "ok": not missing,
+        "missing": [e.get("field") for e in missing],
+        "api_key_configured": bool(capability.api_key),
+        "api_url_configured": bool(capability.api_url),
+        "base_url_configured": bool(capability.base_url),
+        "model_configured": bool(capability.model),
+    }
+    if capability.model:
+        payload["model"] = capability.model
+    return payload
+
+
+def web_runner_config_status():
+    """Return local configuration status without exposing secret values."""
+    config = load_runtime_config(verbose=False)
+    errors = config.validation_errors()
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "capabilities": {
+            "text_llm": _web_runner_capability_status(config, "text_llm", errors),
+            "mineru": _web_runner_capability_status(config, "mineru", errors),
+            "image_semantic": _web_runner_capability_status(config, "image_semantic", errors),
+            "reference_lookup": _web_runner_capability_status(config, "reference_lookup", errors),
+            "image_detector": _web_runner_capability_status(config, "image_detector", errors),
+        },
+        "optional_dependencies": {
+            "python_docx": bool(DOCX_SUPPORTED),
+            "openpyxl": bool(EXCEL_SUPPORTED),
+        },
+        "repair_files": ["config.example.py", "config.py", "environment variables"],
+    }
+
+
+class WebRunnerState:
+    """State boundary for the local browser runner."""
+
+    def __init__(self, history_path=None):
+        self.history_path = _web_runner_history_path(history_path)
+        self.lock = threading.Lock()
+        self.runs = {}
+        self.active_run_id = None
+        self._load_history()
+
+    def _load_history(self):
+        try:
+            payload = json.loads(self.history_path.read_text(encoding="utf-8"))
+            items = payload.get("runs") if isinstance(payload, dict) else payload
+            if isinstance(items, list):
+                self.runs = {str(item.get("id")): dict(item) for item in items if item.get("id")}
+                for run in self.runs.values():
+                    if run.get("status") == "running":
+                        run["status"] = "failed"
+                        run["finished_at"] = run.get("finished_at") or _web_runner_now()
+                        run["message"] = "上次本地服务退出时该任务仍在运行。"
+        except FileNotFoundError:
+            self.runs = {}
+        except Exception:
+            self.runs = {}
+
+    def _save_history(self):
+        self.history_path.parent.mkdir(parents=True, exist_ok=True)
+        items = [_web_runner_safe_run(run) for run in self.runs.values()]
+        items.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+        tmp_path = self.history_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps({"runs": items[:100]}, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self.history_path)
+
+    def list_runs(self):
+        with self.lock:
+            items = [_web_runner_safe_run(run) for run in self.runs.values()]
+        items.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+        return items[:100]
+
+    def get_run(self, run_id):
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            return _web_runner_safe_run(run) if run else None
+
+    def _append_log(self, run_id, text):
+        if text is None:
+            return
+        line = str(text).rstrip("\n")
+        with self.lock:
+            run = self.runs.get(run_id)
+            if not run:
+                return
+            logs = run.setdefault("logs", [])
+            logs.append(line)
+            if len(logs) > 2000:
+                del logs[: len(logs) - 2000]
+            run["log_count"] = len(logs)
+
+    def logs_since(self, run_id, offset=0):
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            if not run:
+                return None
+            logs = list(run.get("logs") or [])
+        start = max(0, int(offset or 0))
+        return {"ok": True, "run_id": str(run_id), "offset": len(logs), "lines": logs[start:]}
+
+    def start_run(self, input_path, output=None, fresh=False):
+        input_text = str(input_path or "").strip()
+        if not input_text:
+            return {"ok": False, "error": "input_path_required", "message": "请输入文件或目录路径。"}, 400
+        resolved_input = str(Path(input_text).expanduser())
+        command = [
+            sys.executable,
+            str(_report_action_entrypoint()),
+            resolved_input,
+            "--json",
+            "--no-open",
+        ]
+        output_text = str(output or "").strip()
+        if output_text:
+            command.extend(["-o", output_text])
+        if fresh:
+            command.append("--fresh")
+
+        with self.lock:
+            if self.active_run_id:
+                active = self.runs.get(self.active_run_id) or {}
+                if active.get("status") == "running":
+                    return {"ok": False, "error": "busy", "active_run": _web_runner_safe_run(active)}, 409
+                self.active_run_id = None
+            run_id = _web_runner_run_id(resolved_input)
+            run = {
+                "id": run_id,
+                "input_path": resolved_input,
+                "output": output_text,
+                "fresh": bool(fresh),
+                "command": command,
+                "started_at": _web_runner_now(),
+                "finished_at": None,
+                "status": "running",
+                "message": "审查运行中",
+                "logs": [],
+                "log_count": 0,
+                "artifacts": {},
+                "report_type": "",
+            }
+            self.runs[run_id] = run
+            self.active_run_id = run_id
+            self._save_history()
+
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception as e:
+            with self.lock:
+                run = self.runs[run_id]
+                run["status"] = "failed"
+                run["finished_at"] = _web_runner_now()
+                run["message"] = f"{type(e).__name__}: {_brief_text(str(e), 240)}"
+                self.active_run_id = None
+                self._save_history()
+            return {"ok": False, "error": "start_failed", "run": self.get_run(run_id)}, 500
+
+        with self.lock:
+            run = self.runs[run_id]
+            run["_process"] = process
+            run["pid"] = getattr(process, "pid", None)
+            self._save_history()
+
+        thread = threading.Thread(target=self._watch_process, args=(run_id, process), daemon=True)
+        thread.start()
+        return {"ok": True, "run": self.get_run(run_id)}, 200
+
+    def _watch_process(self, run_id, process):
+        try:
+            stdout = getattr(process, "stdout", None)
+            if stdout is not None:
+                for line in stdout:
+                    self._append_log(run_id, line)
+            returncode = process.wait()
+        except Exception as e:
+            self._append_log(run_id, f"[web-runner] {type(e).__name__}: {_brief_text(str(e), 240)}")
+            returncode = getattr(process, "returncode", 1)
+        self._finish_run(run_id, returncode)
+
+    def _finish_run(self, run_id, returncode):
+        with self.lock:
+            run = self.runs.get(run_id)
+            if not run:
+                return
+            canceled = bool(run.get("_cancel_requested"))
+            run["returncode"] = returncode
+            run["finished_at"] = _web_runner_now()
+            if canceled:
+                run["status"] = "canceled"
+                run["message"] = "已取消。本输入的断点续作缓存会在下次重新运行时继续复用。"
+            elif int(returncode or 0) == 0:
+                run["status"] = "succeeded"
+                run["message"] = "审查完成"
+            else:
+                run["status"] = "failed"
+                run["message"] = f"审查失败，退出码 {returncode}"
+            run.pop("_process", None)
+            if self.active_run_id == run_id:
+                self.active_run_id = None
+        self.discover_artifacts(run_id)
+
+    def cancel_run(self, run_id):
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            if not run:
+                return {"ok": False, "error": "not_found"}, 404
+            process = run.get("_process")
+            if run.get("status") != "running" or process is None:
+                return {"ok": True, "run": _web_runner_safe_run(run)}, 200
+            run["_cancel_requested"] = True
+            run["message"] = "正在取消"
+            self._save_history()
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except TypeError:
+                process.wait()
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except Exception as e:
+            self._append_log(str(run_id), f"[web-runner] 取消失败: {type(e).__name__}: {_brief_text(str(e), 240)}")
+        return {"ok": True, "run": self.get_run(run_id)}, 200
+
+    def _artifact_candidates(self, run):
+        input_path = Path(run.get("input_path") or "")
+        output_base = _web_runner_output_base(run.get("output"))
+        candidates = []
+        for report_type in ("complete", "limited"):
+            md_path, html_path, json_path = audit_artifact_paths(input_path, report_type, output_path=output_base)
+            candidates.append((report_type, {"markdown": md_path, "html": html_path, "json": json_path}))
+        if output_base:
+            failed_paths = failed_audit_artifact_paths(input_path, output_dir=output_base.parent, output_stem=output_base.name)
+        else:
+            failed_paths = failed_audit_artifact_paths(input_path)
+        candidates.append(("failed", {"markdown": failed_paths[0], "html": failed_paths[1], "json": failed_paths[2]}))
+        return candidates
+
+    def discover_artifacts(self, run_id):
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            if not run:
+                return None
+            run_copy = dict(run)
+        discovered = {}
+        report_type = ""
+        summary = {}
+        for candidate_type, paths in self._artifact_candidates(run_copy):
+            existing = {kind: str(Path(path).resolve()) for kind, path in paths.items() if path and Path(path).exists()}
+            if existing:
+                discovered.update(existing)
+                report_type = candidate_type
+                json_path = existing.get("json")
+                if json_path:
+                    try:
+                        payload = json.loads(Path(json_path).read_text(encoding="utf-8"))
+                        report = payload.get("report") if isinstance(payload, dict) else {}
+                        summary = {
+                            "summary": _brief_text((report or payload).get("summary", ""), 500),
+                            "risk_level": (report or payload).get("risk_level", ""),
+                            "report_type": payload.get("report_type") or candidate_type,
+                        }
+                    except Exception:
+                        summary = {}
+                break
+        folder = None
+        if discovered:
+            first_path = Path(next(iter(discovered.values())))
+            folder = str(first_path.parent.resolve())
+        elif run_copy.get("output"):
+            base = _web_runner_output_base(run_copy.get("output"))
+            if base:
+                folder = str(base.parent.resolve())
+        else:
+            input_path = Path(run_copy.get("input_path") or "")
+            if input_path:
+                folder = str((input_path if input_path.is_dir() else input_path.parent).resolve())
+        if folder:
+            discovered["folder"] = folder
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            if run:
+                run["artifacts"] = discovered
+                run["report_type"] = report_type
+                run["summary"] = summary
+                self._save_history()
+                return _web_runner_safe_run(run)
+        return None
+
+    def artifact_target(self, run_id, kind):
+        if kind not in {"html", "markdown", "json", "folder"}:
+            return None, "unknown_artifact"
+        with self.lock:
+            run = self.runs.get(str(run_id))
+            if not run:
+                return None, "not_found"
+            artifacts = dict(run.get("artifacts") or {})
+        if kind not in artifacts:
+            self.discover_artifacts(run_id)
+            with self.lock:
+                run = self.runs.get(str(run_id)) or {}
+                artifacts = dict(run.get("artifacts") or {})
+        raw_path = artifacts.get(kind)
+        if not raw_path:
+            return None, "not_recorded"
+        path = Path(raw_path)
+        if kind != "folder" and not path.exists():
+            return None, "missing"
+        return path, ""
+
+
+def render_web_runner_page():
+    return """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veritas Web Runner</title>
+<style>
+:root { color-scheme: light; --bg:#f5f5f3; --panel:#ffffff; --line:#d8d8d3; --text:#191919; --muted:#6a6a64; --accent:#155e75; --danger:#b42318; --ok:#237a4b; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif; font-size:14px; letter-spacing:0; }
+header { height:54px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; border-bottom:1px solid var(--line); background:#fff; }
+h1 { font-size:18px; margin:0; font-weight:750; }
+main { display:grid; grid-template-columns:minmax(360px, 520px) minmax(420px, 1fr); gap:16px; padding:16px; max-width:1440px; margin:0 auto; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; }
+h2 { font-size:14px; margin:0 0 12px; font-weight:750; }
+label { display:block; color:var(--muted); font-size:12px; margin:10px 0 5px; }
+input[type="text"] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; background:#fff; color:var(--text); }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.actions { margin-top:12px; display:flex; gap:8px; }
+button, .linkbtn { min-height:36px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text); padding:7px 12px; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.danger { border-color:#e3aaa5; color:var(--danger); }
+button:disabled { opacity:.55; cursor:not-allowed; }
+.status { display:inline-flex; min-height:26px; align-items:center; padding:3px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+.status.succeeded { color:var(--ok); border-color:#9bc7ad; }
+.status.failed, .status.canceled { color:var(--danger); border-color:#e3aaa5; }
+.grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.cell { border:1px solid var(--line); border-radius:6px; padding:8px; min-height:54px; overflow-wrap:anywhere; }
+.cell span { display:block; color:var(--muted); font-size:12px; }
+.cell strong { display:block; margin-top:3px; font-size:13px; }
+#log { height:430px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#161616; color:#f4f4f0; border-radius:6px; padding:12px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.run { border-top:1px solid var(--line); padding:10px 0; }
+.run:first-child { border-top:0; padding-top:0; }
+.run-title { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.run path, code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.muted { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.links { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.check { display:flex; align-items:center; gap:7px; margin-top:10px; color:var(--text); }
+@media (max-width:900px) { main { grid-template-columns:1fr; padding:10px; } header { padding:0 12px; } #log { height:320px; } }
+</style>
+</head>
+<body>
+<header><h1>Veritas Web Runner</h1><span id="topStatus" class="status">local</span></header>
+<main>
+  <div>
+    <section>
+      <h2>审查任务</h2>
+      <label for="inputPath">输入路径</label>
+      <input id="inputPath" type="text" autocomplete="off" placeholder="/path/to/paper-or-folder">
+      <label for="outputPath">输出路径或 stem</label>
+      <input id="outputPath" type="text" autocomplete="off" placeholder="">
+      <label class="check"><input id="fresh" type="checkbox"> 从头重跑</label>
+      <div class="actions">
+        <button id="startBtn" class="primary">Start</button>
+        <button id="cancelBtn" class="danger" disabled>Cancel</button>
+      </div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>配置状态</h2>
+      <div id="config" class="grid"></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">当前运行</h2><span id="runStatus" class="status">idle</span></div>
+      <div id="currentRun" class="muted">No active run</div>
+      <div id="log" aria-label="live log"></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>最近运行</h2>
+      <div id="runs"></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let activeRunId = null;
+let logOffset = 0;
+let timer = null;
+async function api(path, options={}) {
+  const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
+  const data = await res.json();
+  if (!res.ok) throw data;
+  return data;
+}
+function setStatus(text, cls='') {
+  const el = $('runStatus');
+  el.className = 'status ' + cls;
+  el.textContent = text;
+}
+function artifactLinks(run) {
+  const arts = run.artifacts || {};
+  return ['html','markdown','json','folder'].filter(k => arts[k]).map(k => `<a class="linkbtn" target="_blank" href="/artifact/${encodeURIComponent(run.id)}/${k}">${k}</a>`).join('');
+}
+function renderRun(run) {
+  return `<div class="run"><div class="run-title"><strong>${run.status || ''}</strong><span class="status ${run.status || ''}">${run.report_type || run.status || ''}</span></div><div class="muted">${run.input_path || ''}</div><div class="muted">${run.started_at || ''}</div><div class="links">${artifactLinks(run)}</div></div>`;
+}
+async function refreshRuns() {
+  const data = await api('/api/runs');
+  $('runs').innerHTML = (data.runs || []).map(renderRun).join('') || '<div class="muted">No runs yet</div>';
+  const active = (data.runs || []).find(r => r.status === 'running');
+  if (active && !activeRunId) {
+    activeRunId = active.id; logOffset = 0; pollLogs();
+  }
+}
+async function refreshConfig() {
+  const data = await api('/api/config');
+  const caps = data.capabilities || {};
+  $('config').innerHTML = Object.keys(caps).map(k => `<div class="cell"><span>${k}</span><strong>${caps[k].ok ? 'ready' : 'needs config'}</strong><div class="muted">${(caps[k].missing || []).join(', ')}</div></div>`).join('') +
+    `<div class="cell"><span>python-docx</span><strong>${data.optional_dependencies.python_docx ? 'available' : 'missing'}</strong></div><div class="cell"><span>openpyxl</span><strong>${data.optional_dependencies.openpyxl ? 'available' : 'missing'}</strong></div>`;
+}
+async function pollLogs() {
+  if (!activeRunId) return;
+  try {
+    const data = await api(`/api/runs/${encodeURIComponent(activeRunId)}/logs?offset=${logOffset}`);
+    logOffset = data.offset;
+    if (data.lines && data.lines.length) {
+      $('log').textContent += data.lines.join('\\n') + '\\n';
+      $('log').scrollTop = $('log').scrollHeight;
+    }
+    const runData = await api(`/api/runs/${encodeURIComponent(activeRunId)}`);
+    const run = runData.run;
+    $('currentRun').textContent = run.input_path || '';
+    setStatus(run.status || 'unknown', run.status || '');
+    $('cancelBtn').disabled = run.status !== 'running';
+    if (run.status !== 'running') {
+      activeRunId = null;
+      clearInterval(timer);
+      timer = null;
+      refreshRuns();
+    }
+  } catch (e) {
+    setStatus(e.error || 'error', 'failed');
+  }
+}
+$('startBtn').addEventListener('click', async () => {
+  $('log').textContent = '';
+  logOffset = 0;
+  try {
+    const data = await api('/api/runs', {method:'POST', body: JSON.stringify({input_path:$('inputPath').value, output:$('outputPath').value, fresh:$('fresh').checked})});
+    activeRunId = data.run.id;
+    $('cancelBtn').disabled = false;
+    setStatus('running');
+    if (!timer) timer = setInterval(pollLogs, 1200);
+    pollLogs();
+    refreshRuns();
+  } catch (e) {
+    setStatus(e.error || 'start failed', 'failed');
+    $('currentRun').textContent = e.message || JSON.stringify(e);
+  }
+});
+$('cancelBtn').addEventListener('click', async () => {
+  if (!activeRunId) return;
+  await api(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, {method:'POST', body:'{}'});
+  pollLogs();
+});
+refreshConfig();
+refreshRuns();
+</script>
+</body>
+</html>"""
+
+
+def web_runner_cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+def serve_web_runner(host="127.0.0.1", port=8765, open_browser=True, history_path=None):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    state = WebRunnerState(history_path=history_path)
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "VeritasWebRunner/1.0"
+
+        def _send_bytes(self, data, content_type="application/octet-stream", status=200):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            for key, value in web_runner_cors_headers().items():
+                self.send_header(key, value)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_json(self, payload, status=200):
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(data, "application/json; charset=utf-8", status=status)
+
+        def _route(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            query = urllib.parse.parse_qs(parsed.query)
+            return path, query
+
+        def do_OPTIONS(self):
+            self._send_json({"ok": True})
+
+        def do_GET(self):
+            path, query = self._route()
+            if path == "/":
+                self._send_bytes(render_web_runner_page().encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path == "/health":
+                self._send_json({"ok": True, "model": LLM_MODEL, "web_runner": True})
+                return
+            if path == "/api/config":
+                self._send_json(web_runner_config_status())
+                return
+            if path == "/api/runs":
+                self._send_json({"ok": True, "runs": state.list_runs()})
+                return
+            match = re.match(r"^/api/runs/([^/]+)$", path)
+            if match:
+                run = state.get_run(urllib.parse.unquote(match.group(1)))
+                self._send_json({"ok": bool(run), "run": run} if run else {"ok": False, "error": "not_found"}, 200 if run else 404)
+                return
+            match = re.match(r"^/api/runs/([^/]+)/logs$", path)
+            if match:
+                payload = state.logs_since(urllib.parse.unquote(match.group(1)), (query.get("offset") or ["0"])[0])
+                self._send_json(payload if payload else {"ok": False, "error": "not_found"}, 200 if payload else 404)
+                return
+            match = re.match(r"^/api/runs/([^/]+)/artifacts$", path)
+            if match:
+                run = state.discover_artifacts(urllib.parse.unquote(match.group(1)))
+                self._send_json({"ok": bool(run), "run": run, "artifacts": (run or {}).get("artifacts", {})}, 200 if run else 404)
+                return
+            match = re.match(r"^/artifact/([^/]+)/([^/]+)$", path)
+            if match:
+                run_id = urllib.parse.unquote(match.group(1))
+                kind = urllib.parse.unquote(match.group(2))
+                target, error = state.artifact_target(run_id, kind)
+                if error:
+                    self._send_json({"ok": False, "error": error}, 404)
+                    return
+                if kind == "folder":
+                    payload = json.dumps({"ok": True, "path": str(target)}, ensure_ascii=False, indent=2).encode("utf-8")
+                    self._send_bytes(payload, "application/json; charset=utf-8")
+                    return
+                content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+                self._send_bytes(Path(target).read_bytes(), content_type)
+                return
+            self._send_json({"ok": False, "error": "not_found"}, 404)
+
+        def do_POST(self):
+            path, _query = self._route()
+            if path in {"/generate", "/followups"}:
+                try:
+                    payload = _read_json_request_body(self)
+                    self._send_json(_report_action_api_response(path, payload))
+                except ValueError as e:
+                    status = 413 if str(e) == "request_too_large" else 400
+                    self._send_json({"ok": False, "error": str(e)}, status)
+                except Exception as e:
+                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+                return
+            if path == "/api/runs":
+                try:
+                    payload = _read_json_request_body(self, max_bytes=20_000)
+                    response, status = state.start_run(payload.get("input_path"), output=payload.get("output"), fresh=bool(payload.get("fresh")))
+                    self._send_json(response, status)
+                except Exception as e:
+                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+                return
+            match = re.match(r"^/api/runs/([^/]+)/cancel$", path)
+            if match:
+                response, status = state.cancel_run(urllib.parse.unquote(match.group(1)))
+                self._send_json(response, status)
+                return
+            self._send_json({"ok": False, "error": "not_found"}, 404)
+
+        def log_message(self, fmt, *args):
+            print(f"[web-runner] {self.address_string()} {fmt % args}")
+
+    try:
+        httpd = ThreadingHTTPServer((host, int(port)), Handler)
+    except OSError as e:
+        print(f"无法启动Web Runner: {e}")
+        print(f"端口 {port} 可能已被占用；请改用 --web-port <port>。")
+        return 1
+    url = f"http://{host}:{int(port)}"
+    print(f"Veritas Web Runner 已启动: {url}")
+    print("仅监听 127.0.0.1。按 Ctrl+C 停止。")
+    if open_browser:
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            print(f"自动打开浏览器失败: {e}")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nWeb Runner 已停止")
     finally:
         httpd.server_close()
     return 0
@@ -10832,6 +11497,10 @@ def main():
                         help="启动本机HTML报告动作服务：一键生成PubPeer comment和期刊letter")
     parser.add_argument("--report-actions-port", type=int, default=8765,
                         help="HTML报告动作服务端口（默认8765，仅监听127.0.0.1）")
+    parser.add_argument("--serve-web", action="store_true",
+                        help="启动本机Web Runner工作台：通过浏览器运行审查、查看日志和打开产物")
+    parser.add_argument("--web-port", type=int, default=8765,
+                        help="Web Runner端口（默认8765，仅监听127.0.0.1）")
     parser.add_argument("--update-patterns", metavar="COMMENTS_FILE", 
                         help="从PubPeer评论文本文件中自动提取新的欺诈模式，更新知识库")
     parser.add_argument("--mineru", action="store_true",
@@ -10904,10 +11573,13 @@ def main():
     if args.serve_report_actions:
         apply_runtime_config(load_runtime_config())
         return serve_report_actions(port=args.report_actions_port)
+    if args.serve_web:
+        apply_runtime_config(load_runtime_config())
+        return serve_web_runner(port=args.web_port, open_browser=not args.no_open)
 
     # ─── 正常审查模式 ───
     if not args.pdf_path:
-        parser.error("审查模式需要提供path参数（文件或目录，或使用 --update-patterns 更新知识库）")
+        parser.error("审查模式需要提供path参数（文件或目录，或使用 --update-patterns / --serve-web 更新知识库或启动服务）")
 
     run_request = RunRequest.from_args(args)
     return run_audit(run_request, args).exit_code

@@ -213,6 +213,100 @@ result = generate_and_save_followup_draft(
 )
 ```
 
+## Scenario: Local Web Runner Service Contract
+
+### 1. Scope / Trigger
+
+- Trigger: A local browser workbench starts real audit runs through the existing
+  CLI and exposes run state, logs, config status, and recorded artifacts over
+  localhost HTTP.
+- Applies to `python paper_audit.py --serve-web`, not to cloud hosting or
+  arbitrary filesystem browsing.
+
+### 2. Signatures
+
+- CLI:
+  - `python paper_audit.py --serve-web [--web-port PORT] [--no-open]`
+  - Audit subprocess command:
+    `python paper_audit.py <input_path> --json --no-open [-o output] [--fresh]`
+- HTTP routes:
+  - `GET /`
+  - `GET /health`
+  - `GET /api/config`
+  - `GET /api/runs`
+  - `POST /api/runs`
+  - `GET /api/runs/<run_id>`
+  - `GET /api/runs/<run_id>/logs?offset=N`
+  - `GET /api/runs/<run_id>/artifacts`
+  - `POST /api/runs/<run_id>/cancel`
+  - `GET /artifact/<run_id>/<kind>`
+  - Shared report actions: `POST /generate`, `POST /followups`
+
+### 3. Contracts
+
+- Server must bind to `127.0.0.1` by default; do not add a public host option
+  without a separate security review.
+- `POST /api/runs` accepts only `input_path`, optional `output`, and `fresh`.
+  The server always adds `--json --no-open`.
+- Only one audit run may be active. Extra starts return HTTP 409 with
+  `error: "busy"`.
+- History is a convenience index at `.veritas_web/runs.json`; audit artifacts
+  remain in the existing CLI output locations.
+- Config status may report booleans such as `api_key_configured`; it must not
+  include raw API keys or secret values.
+- Artifact serving must be allowlisted by recorded run metadata. Valid kinds
+  are `html`, `markdown`, `json`, and `folder`.
+
+### 4. Validation & Error Matrix
+
+- Empty `input_path` -> HTTP 400 `input_path_required`.
+- Active run exists -> HTTP 409 `busy`.
+- Subprocess spawn failure -> HTTP 500 `start_failed`.
+- Unknown run id -> HTTP 404 `not_found`.
+- Unknown artifact kind -> HTTP 404 `unknown_artifact`.
+- Recorded artifact path missing -> HTTP 404 `missing`.
+- Port conflict -> process exits non-zero with guidance to use `--web-port`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: User opens `/`, starts one directory audit, watches log polling, then
+  opens recorded HTML/Markdown/JSON artifacts.
+- Base: User cancels a run; the run becomes `canceled` and explains that rerun
+  can reuse resume caches.
+- Bad: Web API accepts an arbitrary file path under `/artifact` and returns its
+  contents without being attached to a recorded run.
+
+### 6. Tests Required
+
+- CLI help exposes `--serve-web` and `--web-port`.
+- Service mode loads runtime config and respects `--no-open`.
+- Workbench HTML contains path input, output input, fresh checkbox, start,
+  cancel, logs, config, and recent-runs regions.
+- Config API/status does not serialize secret key values.
+- Starting a run calls `subprocess.Popen` with the existing CLI plus
+  `--json --no-open`, optional `-o`, and optional `--fresh`.
+- A second active run is rejected; cancel calls `terminate()` and records
+  `canceled`.
+- Log polling returns cursor/offset-based lines.
+- Artifact lookup rejects unknown or unrecorded kinds.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+return Path(request.query["path"]).read_bytes()
+```
+
+#### Correct
+
+```python
+target, error = state.artifact_target(run_id, kind)
+if error:
+    return {"ok": False, "error": error}, 404
+return Path(target).read_bytes()
+```
+
 ## Scenario: Direct Single-File Text Extraction
 
 ### 1. Scope / Trigger

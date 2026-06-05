@@ -1,7 +1,9 @@
 import json
+import io
 import types
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 import zipfile
@@ -85,6 +87,42 @@ def test_report_action_service_mode_loads_runtime_config(monkeypatch):
         "llm_api_url": "https://llm.example.test/v1/chat/completions",
         "llm_model": "model-x",
         "llm_timeout": 12,
+    }
+
+
+def test_web_runner_service_mode_loads_runtime_config(monkeypatch):
+    fake_config = types.SimpleNamespace(
+        LLM_API_KEY="llm-key",
+        LLM_API_URL="https://llm.example.test/v1/chat/completions",
+        LLM_MODEL="model-x",
+        MINERU_TOKEN="mineru-token",
+        MINERU_BASE="https://mineru.example.test",
+        IMAGE_SEMANTIC_API_KEY="vision-key",
+        IMAGE_SEMANTIC_API_URL="https://vision.example.test/chat",
+        IMAGE_SEMANTIC_MODEL="vision-x",
+        LLM_TIMEOUT=12,
+        LLM_RETRIES=3,
+    )
+    captured = {}
+
+    monkeypatch.setattr(paper_audit.importlib, "import_module", lambda name: fake_config)
+    monkeypatch.setattr(sys, "argv", ["paper_audit.py", "--serve-web", "--web-port", "9011", "--no-open"])
+
+    def fake_serve_web_runner(port=8765, open_browser=True):
+        captured["port"] = port
+        captured["open_browser"] = open_browser
+        captured["llm_api_key"] = paper_audit.LLM_API_KEY
+        captured["llm_model"] = paper_audit.LLM_MODEL
+        return 0
+
+    monkeypatch.setattr(paper_audit, "serve_web_runner", fake_serve_web_runner)
+
+    assert paper_audit.main() == 0
+    assert captured == {
+        "port": 9011,
+        "open_browser": False,
+        "llm_api_key": "llm-key",
+        "llm_model": "model-x",
     }
 
 
@@ -2681,6 +2719,8 @@ def test_cli_help_exposes_no_open():
     assert "--no-resource-online" in result.stdout
     assert "不再打开网页或要求手动上传" in result.stdout
     assert "--serve-report-actions" in result.stdout
+    assert "--serve-web" in result.stdout
+    assert "--web-port" in result.stdout
     assert "--llm-provider" not in result.stdout
     assert "--ignore-config-llm" not in result.stdout
     assert "mykey.py" not in result.stdout
@@ -3424,6 +3464,179 @@ def test_ensure_report_action_service_starts_background_process(monkeypatch, tmp
     assert "9002" in command
     assert popen_calls[0][1]["stdin"] == subprocess.DEVNULL
     assert popen_calls[0][1]["start_new_session"] is True
+
+
+def _wait_for_test(predicate, timeout=1.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    assert predicate()
+
+
+def test_web_runner_page_contains_workbench_controls():
+    rendered = paper_audit.render_web_runner_page()
+
+    assert "Veritas Web Runner" in rendered
+    assert 'id="inputPath"' in rendered
+    assert 'id="outputPath"' in rendered
+    assert 'id="fresh"' in rendered
+    assert 'id="startBtn"' in rendered
+    assert 'id="cancelBtn"' in rendered
+    assert 'id="log"' in rendered
+    assert 'id="runs"' in rendered
+
+
+def test_web_runner_config_status_does_not_expose_api_keys(monkeypatch):
+    cfg = paper_audit.default_runtime_config()
+    cfg.text_llm.api_key = "secret-llm-key"
+    cfg.mineru.api_key = "secret-mineru-key"
+    cfg.image_semantic.api_key = "secret-vision-key"
+    monkeypatch.setattr(paper_audit, "load_runtime_config", lambda verbose=False: cfg)
+
+    status = paper_audit.web_runner_config_status()
+    rendered = json.dumps(status, ensure_ascii=False)
+
+    assert status["capabilities"]["text_llm"]["api_key_configured"] is True
+    assert "secret-llm-key" not in rendered
+    assert "secret-mineru-key" not in rendered
+    assert "secret-vision-key" not in rendered
+
+
+def test_web_runner_cors_headers_preserve_report_action_compatibility():
+    headers = paper_audit.web_runner_cors_headers()
+
+    assert headers["Access-Control-Allow-Origin"] == "*"
+    assert "POST" in headers["Access-Control-Allow-Methods"]
+    assert headers["Access-Control-Allow-Headers"] == "Content-Type"
+
+
+def test_web_runner_start_run_spawns_existing_cli(monkeypatch, tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("paper", encoding="utf-8")
+    popen_calls = []
+
+    class DummyProcess:
+        pid = 2468
+
+        def __init__(self):
+            self.stdout = io.StringIO("line one\nline two\n")
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return DummyProcess()
+
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", fake_popen)
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    response, status = state.start_run(str(input_path), output=str(tmp_path / "out"), fresh=True)
+
+    assert status == 200
+    run_id = response["run"]["id"]
+    command = popen_calls[0][0][0]
+    assert command[:3] == [sys.executable, str(paper_audit.Path(__file__).resolve().parents[1] / "paper_audit.py"), str(input_path)]
+    assert "--json" in command
+    assert "--no-open" in command
+    assert "-o" in command
+    assert str(tmp_path / "out") in command
+    assert "--fresh" in command
+    assert popen_calls[0][1]["stdin"] == subprocess.DEVNULL
+    assert popen_calls[0][1]["stderr"] == subprocess.STDOUT
+    _wait_for_test(lambda: state.get_run(run_id)["status"] == "succeeded")
+    logs = state.logs_since(run_id, 0)
+    assert logs["lines"] == ["line one", "line two"]
+
+
+def test_web_runner_rejects_second_active_run_and_can_cancel(monkeypatch, tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("paper", encoding="utf-8")
+    processes = []
+
+    class HangingProcess:
+        pid = 1357
+
+        def __init__(self):
+            self.stdout = None
+            self.returncode = None
+            self.terminated = False
+            self.done = threading.Event()
+
+        def wait(self, timeout=None):
+            if timeout is None:
+                self.done.wait(1)
+            elif not self.done.wait(timeout):
+                raise subprocess.TimeoutExpired("paper_audit.py", timeout)
+            if self.returncode is None:
+                self.returncode = -15 if self.terminated else 0
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.done.set()
+
+        def kill(self):
+            self.returncode = -9
+            self.done.set()
+
+    def fake_popen(*args, **kwargs):
+        process = HangingProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", fake_popen)
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    first, first_status = state.start_run(str(input_path))
+    second, second_status = state.start_run(str(input_path))
+
+    assert first_status == 200
+    assert second_status == 409
+    assert second["error"] == "busy"
+    cancel_response, cancel_status = state.cancel_run(first["run"]["id"])
+    assert cancel_status == 200
+    assert cancel_response["ok"] is True
+    assert processes[0].terminated is True
+    _wait_for_test(lambda: state.get_run(first["run"]["id"])["status"] == "canceled")
+    assert "断点续作缓存" in state.get_run(first["run"]["id"])["message"]
+
+
+def test_web_runner_artifact_targets_are_recorded_allowlist_only(tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("paper", encoding="utf-8")
+    html_path = tmp_path / "paper.audit.html"
+    md_path = tmp_path / "paper.audit.md"
+    json_path = tmp_path / "paper.audit.json"
+    secret_path = tmp_path / "secret.txt"
+    html_path.write_text("<html>report</html>", encoding="utf-8")
+    md_path.write_text("# report", encoding="utf-8")
+    json_path.write_text(json.dumps({"report": {"summary": "ok", "risk_level": "低"}}), encoding="utf-8")
+    secret_path.write_text("secret", encoding="utf-8")
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+    state.runs["run-1"] = {
+        "id": "run-1",
+        "input_path": str(input_path),
+        "output": "",
+        "status": "succeeded",
+        "started_at": "2026-06-05T00:00:00",
+        "logs": [],
+        "artifacts": {},
+    }
+
+    run = state.discover_artifacts("run-1")
+    html_target, html_error = state.artifact_target("run-1", "html")
+    unknown_target, unknown_error = state.artifact_target("run-1", "secret")
+
+    assert run["report_type"] == "complete"
+    assert html_error == ""
+    assert html_target == html_path.resolve()
+    assert unknown_target is None
+    assert unknown_error == "unknown_artifact"
+    assert str(secret_path.resolve()) not in json.dumps(run, ensure_ascii=False)
 
 
 def test_report_action_context_cleans_reference_issue_text():
