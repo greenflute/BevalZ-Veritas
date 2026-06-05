@@ -239,6 +239,7 @@ result = generate_and_save_followup_draft(
   - `GET /api/runs/<run_id>/logs?offset=N`
   - `GET /api/runs/<run_id>/artifacts`
   - `POST /api/runs/<run_id>/cancel`
+  - `POST /api/pick-path`
   - `GET /artifact/<run_id>/<kind>`
   - Shared report actions: `POST /generate`, `POST /followups`
 
@@ -248,9 +249,18 @@ result = generate_and_save_followup_draft(
   without a separate security review.
 - `POST /api/runs` accepts only `input_path`, optional `output`, and `fresh`.
   The server always adds `--json --no-open`.
+- When `output` is omitted, the Web Runner must derive an output stem in the
+  input's parent directory as `<project_name>_<YYYYMMDD-HHMMSS>/audit_report`
+  and pass it through `-o`.
 - The workbench may support client-side file/directory drag-and-drop, but it
   must only populate the existing `input_path` field; do not upload bytes or add
   a backend filesystem browser for this interaction.
+- The workbench may expose local picker buttons through `POST /api/pick-path`
+  modes `input_file`, `input_directory`, and `output_directory`; this endpoint
+  opens a native picker when available and returns one selected path, not a
+  browsable directory listing.
+- Primary input/output fields should be readonly display fields; users select
+  with buttons or drag-and-drop.
 - Only one audit run may be active. Extra starts return HTTP 409 with
   `error: "busy"`.
 - History is a convenience index at `.veritas_web/runs.json`; audit artifacts
@@ -265,6 +275,10 @@ result = generate_and_save_followup_draft(
 - Empty `input_path` -> HTTP 400 `input_path_required`.
 - Active run exists -> HTTP 409 `busy`.
 - Subprocess spawn failure -> HTTP 500 `start_failed`.
+- Output directory creation failure -> HTTP 500 `output_prepare_failed`.
+- Unsupported picker mode -> HTTP 400 `unsupported_picker_mode`.
+- Picker canceled -> HTTP 400 `canceled`.
+- Native picker unavailable -> HTTP 400 `picker_unavailable`.
 - Unknown run id -> HTTP 404 `not_found`.
 - Unknown artifact kind -> HTTP 404 `unknown_artifact`.
 - Recorded artifact path missing -> HTTP 404 `missing`.
@@ -287,6 +301,7 @@ result = generate_and_save_followup_draft(
   cancel, logs, config, and recent-runs regions.
 - Workbench drag-and-drop tests assert the drop target, path extraction helper,
   directory-entry support, and `preventDefault()` navigation guard.
+- Unit tests assert default output stem mapping and picker helper behavior.
 - Config API/status does not serialize secret key values.
 - Starting a run calls `subprocess.Popen` with the existing CLI plus
   `--json --no-open`, optional `-o`, and optional `--fresh`.

@@ -3481,7 +3481,12 @@ def test_web_runner_page_contains_workbench_controls():
     assert "Veritas Web Runner" in rendered
     assert 'id="inputDropZone"' in rendered
     assert 'id="inputPath"' in rendered
+    assert 'id="pickFileBtn"' in rendered
+    assert 'id="pickDirectoryBtn"' in rendered
     assert 'id="outputPath"' in rendered
+    assert 'id="pickOutputBtn"' in rendered
+    assert 'id="inputPath" type="text" autocomplete="off" readonly' in rendered
+    assert 'id="outputPath" type="text" autocomplete="off" readonly' in rendered
     assert 'id="fresh"' in rendered
     assert 'id="startBtn"' in rendered
     assert 'id="cancelBtn"' in rendered
@@ -3489,8 +3494,30 @@ def test_web_runner_page_contains_workbench_controls():
     assert 'id="runs"' in rendered
     assert "droppedPathFromDataTransfer" in rendered
     assert "applyDroppedPath" in rendered
+    assert "defaultOutputStemForInput" in rendered
+    assert "/api/pick-path" in rendered
     assert "webkitGetAsEntry" in rendered
     assert "event.preventDefault()" in rendered
+
+
+def test_web_runner_default_output_stem_uses_input_parent_and_timestamp(tmp_path):
+    input_path = tmp_path / "Project Alpha" / "paper.v1.pdf"
+
+    output = paper_audit.web_runner_default_output_stem(input_path, timestamp="20260605-153000")
+
+    assert output == str(tmp_path / "Project Alpha" / "paper.v1_20260605-153000" / "audit_report")
+
+
+def test_pick_local_path_uses_dialog_runner_without_browsing_http(tmp_path):
+    selected = tmp_path / "paper.pdf"
+
+    result = paper_audit.pick_local_path("input_file", dialog_runner=lambda mode: selected)
+    unsupported = paper_audit.pick_local_path("unsupported", dialog_runner=lambda mode: selected)
+    canceled = paper_audit.pick_local_path("output_directory", dialog_runner=lambda mode: "")
+
+    assert result == {"ok": True, "mode": "input_file", "path": str(selected)}
+    assert unsupported["error"] == "unsupported_picker_mode"
+    assert canceled["error"] == "canceled"
 
 
 def test_web_runner_config_status_does_not_expose_api_keys(monkeypatch):
@@ -3555,6 +3582,36 @@ def test_web_runner_start_run_spawns_existing_cli(monkeypatch, tmp_path):
     _wait_for_test(lambda: state.get_run(run_id)["status"] == "succeeded")
     logs = state.logs_since(run_id, 0)
     assert logs["lines"] == ["line one", "line two"]
+
+
+def test_web_runner_start_run_defaults_output_stem(monkeypatch, tmp_path):
+    input_path = tmp_path / "Project Alpha"
+    input_path.mkdir()
+    popen_calls = []
+
+    class DummyProcess:
+        pid = 2469
+
+        def __init__(self):
+            self.stdout = io.StringIO("")
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(paper_audit, "_web_runner_timestamp", lambda: "20260605-153000")
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)) or DummyProcess())
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    response, status = state.start_run(str(input_path))
+
+    expected_output = str(tmp_path / "Project Alpha_20260605-153000" / "audit_report")
+    assert status == 200
+    assert response["run"]["output"] == expected_output
+    command = popen_calls[0][0][0]
+    assert "-o" in command
+    assert expected_output in command
+    assert (tmp_path / "Project Alpha_20260605-153000").is_dir()
 
 
 def test_web_runner_rejects_second_active_run_and_can_cancel(monkeypatch, tmp_path):

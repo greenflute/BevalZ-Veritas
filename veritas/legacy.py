@@ -3138,6 +3138,25 @@ def _web_runner_run_id(input_path):
     return f"{time.strftime('%Y%m%d-%H%M%S')}-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:8]}"
 
 
+def _web_runner_timestamp():
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
+def _web_runner_input_parts(input_path):
+    path = Path(str(input_path or "").strip()).expanduser()
+    name = path.name or "audit_project"
+    looks_like_file = path.is_file() or (not path.exists() and bool(path.suffix))
+    project = path.stem if looks_like_file else name
+    parent = path.parent if looks_like_file else path.parent
+    return parent, _safe_name(project)
+
+
+def web_runner_default_output_stem(input_path, timestamp=None):
+    parent, project = _web_runner_input_parts(input_path)
+    stamp = timestamp or _web_runner_timestamp()
+    return str(parent / f"{project}_{stamp}" / "audit_report")
+
+
 def _web_runner_safe_run(run):
     public = dict(run or {})
     public.pop("_process", None)
@@ -3182,6 +3201,34 @@ def web_runner_config_status():
         },
         "repair_files": ["config.example.py", "config.py", "environment variables"],
     }
+
+
+def pick_local_path(mode, dialog_runner=None):
+    """Open a local native picker when available; never browse files over HTTP."""
+    if mode not in {"input_file", "input_directory", "output_directory"}:
+        return {"ok": False, "error": "unsupported_picker_mode"}
+    try:
+        if dialog_runner is not None:
+            selected = dialog_runner(mode)
+        else:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            if mode == "input_file":
+                selected = filedialog.askopenfilename(title="选择审查文件")
+            elif mode == "input_directory":
+                selected = filedialog.askdirectory(title="选择审查目录", mustexist=True)
+            else:
+                selected = filedialog.askdirectory(title="选择输出目录", mustexist=False)
+            root.destroy()
+        if not selected:
+            return {"ok": False, "error": "canceled", "mode": mode}
+        return {"ok": True, "mode": mode, "path": str(Path(selected).expanduser())}
+    except Exception as e:
+        return {"ok": False, "error": "picker_unavailable", "message": f"{type(e).__name__}: {_brief_text(str(e), 240)}", "mode": mode}
 
 
 class WebRunnerState:
@@ -3265,7 +3312,13 @@ class WebRunnerState:
             "--no-open",
         ]
         output_text = str(output or "").strip()
+        if not output_text:
+            output_text = web_runner_default_output_stem(resolved_input)
         if output_text:
+            try:
+                Path(output_text).expanduser().parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                return {"ok": False, "error": "output_prepare_failed", "message": f"{type(e).__name__}: {_brief_text(str(e), 240)}"}, 500
             command.extend(["-o", output_text])
         if fresh:
             command.append("--fresh")
@@ -3488,10 +3541,13 @@ section { background:var(--panel); border:1px solid var(--line); border-radius:8
 h2 { font-size:14px; margin:0 0 12px; font-weight:750; }
 label { display:block; color:var(--muted); font-size:12px; margin:10px 0 5px; }
 input[type="text"] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; background:#fff; color:var(--text); }
+input[readonly] { background:#f7f7f5; color:#2f2f2c; cursor:default; }
 .drop-zone { border:1px dashed var(--line); border-radius:8px; padding:10px; background:#fbfbfa; transition:border-color .12s ease, background .12s ease; }
 .drop-zone.dragover { border-color:var(--accent); background:#edf7f8; }
 .drop-zone input[type="text"] { margin-top:5px; }
 .drop-hint { min-height:18px; margin-top:6px; }
+.path-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; align-items:end; }
+.path-row.output { grid-template-columns:minmax(0,1fr) auto; margin-top:5px; }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .actions { margin-top:12px; display:flex; gap:8px; }
 button, .linkbtn { min-height:36px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--text); padding:7px 12px; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
@@ -3524,11 +3580,18 @@ button:disabled { opacity:.55; cursor:not-allowed; }
       <h2>审查任务</h2>
       <div id="inputDropZone" class="drop-zone">
         <label for="inputPath">输入路径 / 拖拽区域</label>
-        <input id="inputPath" type="text" autocomplete="off" placeholder="/path/to/paper-or-folder">
+        <div class="path-row">
+          <input id="inputPath" type="text" autocomplete="off" readonly placeholder="/path/to/paper-or-folder">
+          <button id="pickFileBtn" type="button">文件</button>
+          <button id="pickDirectoryBtn" type="button">目录</button>
+        </div>
         <div id="dropHint" class="muted drop-hint">拖拽文件或目录到这里</div>
       </div>
-      <label for="outputPath">输出路径或 stem</label>
-      <input id="outputPath" type="text" autocomplete="off" placeholder="">
+      <label for="outputPath">输出路径</label>
+      <div class="path-row output">
+        <input id="outputPath" type="text" autocomplete="off" readonly placeholder="">
+        <button id="pickOutputBtn" type="button">输出</button>
+      </div>
       <label class="check"><input id="fresh" type="checkbox"> 从头重跑</label>
       <div class="actions">
         <button id="startBtn" class="primary">Start</button>
@@ -3557,6 +3620,7 @@ const $ = (id) => document.getElementById(id);
 let activeRunId = null;
 let logOffset = 0;
 let timer = null;
+let selectedInputKind = '';
 async function api(path, options={}) {
   const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
   const data = await res.json();
@@ -3568,31 +3632,98 @@ function setStatus(text, cls='') {
   el.className = 'status ' + cls;
   el.textContent = text;
 }
-function droppedPathFromDataTransfer(dataTransfer) {
+function pathSeparator(path) {
+  return String(path || '').includes('\\\\') ? '\\\\' : '/';
+}
+function trimPath(path) {
+  return String(path || '').trim().replace(/[\\\\/]+$/, '');
+}
+function pathBaseName(path) {
+  const cleaned = trimPath(path);
+  const sep = pathSeparator(cleaned);
+  return cleaned.split(sep).filter(Boolean).pop() || 'audit_project';
+}
+function pathParent(path) {
+  const cleaned = trimPath(path);
+  const sep = pathSeparator(cleaned);
+  const parts = cleaned.split(sep);
+  parts.pop();
+  const parent = parts.join(sep);
+  if (parent) return parent;
+  return cleaned.startsWith(sep) ? sep : '.';
+}
+function joinPath(...parts) {
+  const filtered = parts.map(p => String(p || '')).filter(Boolean);
+  const sep = filtered.some(p => p.includes('\\\\')) ? '\\\\' : '/';
+  const joined = filtered.join(sep);
+  return sep === '\\\\' ? joined.replace(/\\\\{2,}/g, '\\\\') : joined.replace(/\\/{2,}/g, '/');
+}
+function stripExtension(name) {
+  const dot = String(name || '').lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+function safeProjectName(name) {
+  return String(name || 'audit_project').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g, '_').replace(/[ .]+$/g, '') || 'audit_project';
+}
+function timestampForOutput(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+function defaultOutputStemForInput(inputPath, kind = selectedInputKind, date = new Date()) {
+  const cleaned = trimPath(inputPath);
+  if (!cleaned) return '';
+  const base = pathBaseName(cleaned);
+  const project = safeProjectName(kind === 'directory' ? base : stripExtension(base));
+  return joinPath(pathParent(cleaned), `${project}_${timestampForOutput(date)}`, 'audit_report');
+}
+function setSelectedInputPath(path, kind = '') {
+  selectedInputKind = kind;
+  $('inputPath').value = path;
+  $('dropHint').textContent = path;
+  $('outputPath').value = defaultOutputStemForInput(path, kind);
+  $('outputPath').dataset.userSelected = '';
+  $('inputPath').dispatchEvent(new Event('change', {bubbles: true}));
+}
+function droppedPathInfoFromDataTransfer(dataTransfer) {
   const items = Array.from((dataTransfer && dataTransfer.items) || []);
   for (const item of items) {
     const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
     if (entry) {
       const entryPath = entry.fullPath && entry.fullPath !== '/' ? entry.fullPath.replace(/^\\//, '') : entry.name;
-      if (entryPath) return entryPath;
+      if (entryPath) return {path: entryPath, kind: entry.isDirectory ? 'directory' : 'file'};
     }
   }
   const files = Array.from((dataTransfer && dataTransfer.files) || []);
-  if (!files.length) return '';
+  if (!files.length) return {path: '', kind: ''};
   const file = files[0];
-  return file.path || file.webkitRelativePath || file.name || '';
+  return {path: file.path || file.webkitRelativePath || file.name || '', kind: 'file'};
+}
+function droppedPathFromDataTransfer(dataTransfer) {
+  return droppedPathInfoFromDataTransfer(dataTransfer).path;
 }
 function applyDroppedPath(dataTransfer) {
-  const path = droppedPathFromDataTransfer(dataTransfer);
-  if (!path) return false;
-  $('inputPath').value = path;
-  $('dropHint').textContent = path;
-  $('inputPath').dispatchEvent(new Event('change', {bubbles: true}));
+  const info = droppedPathInfoFromDataTransfer(dataTransfer);
+  if (!info.path) return false;
+  setSelectedInputPath(info.path, info.kind);
   return true;
 }
 function dragHasFiles(event) {
   const types = Array.from((event.dataTransfer && event.dataTransfer.types) || []);
   return types.includes('Files');
+}
+async function chooseLocalPath(mode) {
+  try {
+    const data = await api('/api/pick-path', {method:'POST', body: JSON.stringify({mode})});
+    if (mode === 'input_file') setSelectedInputPath(data.path, 'file');
+    if (mode === 'input_directory') setSelectedInputPath(data.path, 'directory');
+    if (mode === 'output_directory') {
+      $('outputPath').value = joinPath(data.path, 'audit_report');
+      $('outputPath').dataset.userSelected = 'true';
+    }
+  } catch (e) {
+    setStatus(e.error || 'picker failed', 'failed');
+    $('currentRun').textContent = e.message || e.error || JSON.stringify(e);
+  }
 }
 function artifactLinks(run) {
   const arts = run.artifacts || {};
@@ -3642,6 +3773,9 @@ async function pollLogs() {
 $('startBtn').addEventListener('click', async () => {
   $('log').textContent = '';
   logOffset = 0;
+  if (!$('outputPath').value && $('inputPath').value) {
+    $('outputPath').value = defaultOutputStemForInput($('inputPath').value);
+  }
   try {
     const data = await api('/api/runs', {method:'POST', body: JSON.stringify({input_path:$('inputPath').value, output:$('outputPath').value, fresh:$('fresh').checked})});
     activeRunId = data.run.id;
@@ -3655,6 +3789,9 @@ $('startBtn').addEventListener('click', async () => {
     $('currentRun').textContent = e.message || JSON.stringify(e);
   }
 });
+$('pickFileBtn').addEventListener('click', () => chooseLocalPath('input_file'));
+$('pickDirectoryBtn').addEventListener('click', () => chooseLocalPath('input_directory'));
+$('pickOutputBtn').addEventListener('click', () => chooseLocalPath('output_directory'));
 $('cancelBtn').addEventListener('click', async () => {
   if (!activeRunId) return;
   await api(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, {method:'POST', body:'{}'});
@@ -3786,6 +3923,14 @@ def serve_web_runner(host="127.0.0.1", port=8765, open_browser=True, history_pat
                     payload = _read_json_request_body(self, max_bytes=20_000)
                     response, status = state.start_run(payload.get("input_path"), output=payload.get("output"), fresh=bool(payload.get("fresh")))
                     self._send_json(response, status)
+                except Exception as e:
+                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+                return
+            if path == "/api/pick-path":
+                try:
+                    payload = _read_json_request_body(self, max_bytes=20_000)
+                    response = pick_local_path(payload.get("mode"))
+                    self._send_json(response, 200 if response.get("ok") else 400)
                 except Exception as e:
                     self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
                 return
