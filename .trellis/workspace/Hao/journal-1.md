@@ -402,3 +402,36 @@ Added readonly Web Runner path fields, local picker buttons, default timestamped
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Web Runner Completion Actions
+
+**Date**: 2026-06-05
+**Task**: Web Runner Completion Actions
+**Branch**: `main`
+
+### Summary
+
+Added current-run output display, completion artifact actions, and retry behavior for failed or canceled Web Runner runs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `77a6b40` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
