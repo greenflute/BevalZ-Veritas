@@ -261,6 +261,11 @@ result = generate_and_save_followup_draft(
   browsable directory listing.
 - Primary input/output fields should be readonly display fields; users select
   with buttons or drag-and-drop.
+- The current-run panel should surface the selected/running output path and
+  render allowlisted artifact actions after completion.
+- Failed and canceled runs may expose a retry action, but retry must call the
+  same `POST /api/runs` path with the previous run's `input_path`, `output`,
+  and `fresh` values; it must not bypass the single-active-run guard.
 - Only one audit run may be active. Extra starts return HTTP 409 with
   `error: "busy"`.
 - History is a convenience index at `.veritas_web/runs.json`; audit artifacts
@@ -302,6 +307,8 @@ result = generate_and_save_followup_draft(
 - Workbench drag-and-drop tests assert the drop target, path extraction helper,
   directory-entry support, and `preventDefault()` navigation guard.
 - Unit tests assert default output stem mapping and picker helper behavior.
+- Workbench tests assert current-run output/actions and retry helpers are
+  rendered.
 - Config API/status does not serialize secret key values.
 - Starting a run calls `subprocess.Popen` with the existing CLI plus
   `--json --no-open`, optional `-o`, and optional `--fresh`.

@@ -3490,11 +3490,18 @@ def test_web_runner_page_contains_workbench_controls():
     assert 'id="fresh"' in rendered
     assert 'id="startBtn"' in rendered
     assert 'id="cancelBtn"' in rendered
+    assert 'id="currentOutput"' in rendered
+    assert 'id="currentActions"' in rendered
     assert 'id="log"' in rendered
     assert 'id="runs"' in rendered
     assert "droppedPathFromDataTransfer" in rendered
     assert "applyDroppedPath" in rendered
     assert "defaultOutputStemForInput" in rendered
+    assert "renderCurrentRun" in rendered
+    assert "currentArtifactActions" in rendered
+    assert "retryRun" in rendered
+    assert "startRunWithPayload" in rendered
+    assert "escapeHtml" in rendered
     assert "/api/pick-path" in rendered
     assert "webkitGetAsEntry" in rendered
     assert "event.preventDefault()" in rendered

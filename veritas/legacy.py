@@ -3569,6 +3569,10 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .muted { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .links { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 .check { display:flex; align-items:center; gap:7px; margin-top:10px; color:var(--text); }
+.current-card { border:1px solid var(--line); border-radius:6px; padding:9px; margin-bottom:10px; min-height:58px; }
+.current-card span { display:block; color:var(--muted); font-size:12px; }
+.current-card strong { display:block; margin-top:3px; overflow-wrap:anywhere; }
+.current-actions { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; min-height:36px; }
 @media (max-width:900px) { main { grid-template-columns:1fr; padding:10px; } header { padding:0 12px; } #log { height:320px; } }
 </style>
 </head>
@@ -3606,7 +3610,9 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   <div>
     <section>
       <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">当前运行</h2><span id="runStatus" class="status">idle</span></div>
-      <div id="currentRun" class="muted">No active run</div>
+      <div id="currentRun" class="current-card"><span>输入</span><strong>No active run</strong></div>
+      <div id="currentOutput" class="current-card"><span>输出</span><strong></strong></div>
+      <div id="currentActions" class="current-actions"></div>
       <div id="log" aria-label="live log"></div>
     </section>
     <section style="margin-top:16px">
@@ -3621,6 +3627,7 @@ let activeRunId = null;
 let logOffset = 0;
 let timer = null;
 let selectedInputKind = '';
+let lastRun = null;
 async function api(path, options={}) {
   const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
   const data = await res.json();
@@ -3631,6 +3638,9 @@ function setStatus(text, cls='') {
   const el = $('runStatus');
   el.className = 'status ' + cls;
   el.textContent = text;
+}
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 function pathSeparator(path) {
   return String(path || '').includes('\\\\') ? '\\\\' : '/';
@@ -3729,8 +3739,50 @@ function artifactLinks(run) {
   const arts = run.artifacts || {};
   return ['html','markdown','json','folder'].filter(k => arts[k]).map(k => `<a class="linkbtn" target="_blank" href="/artifact/${encodeURIComponent(run.id)}/${k}">${k}</a>`).join('');
 }
+function currentArtifactActions(run) {
+  const links = artifactLinks(run);
+  const retry = run && ['failed', 'canceled'].includes(run.status || '') ? '<button id="retryRunBtn" type="button">Retry</button>' : '';
+  return `${links}${retry}`;
+}
+function renderCurrentRun(run) {
+  lastRun = run || lastRun;
+  const active = run || {};
+  const input = active.input_path || $('inputPath').value || 'No active run';
+  const output = active.output || $('outputPath').value || '';
+  $('currentRun').innerHTML = `<span>输入</span><strong>${escapeHtml(input)}</strong>`;
+  $('currentOutput').innerHTML = `<span>输出</span><strong>${escapeHtml(output)}</strong>`;
+  $('currentActions').innerHTML = currentArtifactActions(active);
+  const retry = $('retryRunBtn');
+  if (retry) retry.addEventListener('click', () => retryRun(active));
+}
 function renderRun(run) {
-  return `<div class="run"><div class="run-title"><strong>${run.status || ''}</strong><span class="status ${run.status || ''}">${run.report_type || run.status || ''}</span></div><div class="muted">${run.input_path || ''}</div><div class="muted">${run.started_at || ''}</div><div class="links">${artifactLinks(run)}</div></div>`;
+  return `<div class="run"><div class="run-title"><strong>${escapeHtml(run.status || '')}</strong><span class="status ${escapeHtml(run.status || '')}">${escapeHtml(run.report_type || run.status || '')}</span></div><div class="muted">${escapeHtml(run.input_path || '')}</div><div class="muted">${escapeHtml(run.started_at || '')}</div><div class="links">${artifactLinks(run)}</div></div>`;
+}
+async function startRunWithPayload(payload) {
+  $('log').textContent = '';
+  logOffset = 0;
+  try {
+    const data = await api('/api/runs', {method:'POST', body: JSON.stringify(payload)});
+    activeRunId = data.run.id;
+    lastRun = data.run;
+    $('cancelBtn').disabled = false;
+    setStatus('running');
+    renderCurrentRun(data.run);
+    if (!timer) timer = setInterval(pollLogs, 1200);
+    pollLogs();
+    refreshRuns();
+  } catch (e) {
+    setStatus(e.error || 'start failed', 'failed');
+    $('currentRun').innerHTML = `<span>输入</span><strong>${escapeHtml(e.message || JSON.stringify(e))}</strong>`;
+  }
+}
+function retryRun(run) {
+  if (!run || !run.input_path) return;
+  if (activeRunId) return;
+  $('inputPath').value = run.input_path || '';
+  $('outputPath').value = run.output || '';
+  $('fresh').checked = !!run.fresh;
+  startRunWithPayload({input_path: run.input_path, output: run.output, fresh: !!run.fresh});
 }
 async function refreshRuns() {
   const data = await api('/api/runs');
@@ -3757,7 +3809,7 @@ async function pollLogs() {
     }
     const runData = await api(`/api/runs/${encodeURIComponent(activeRunId)}`);
     const run = runData.run;
-    $('currentRun').textContent = run.input_path || '';
+    renderCurrentRun(run);
     setStatus(run.status || 'unknown', run.status || '');
     $('cancelBtn').disabled = run.status !== 'running';
     if (run.status !== 'running') {
@@ -3771,23 +3823,10 @@ async function pollLogs() {
   }
 }
 $('startBtn').addEventListener('click', async () => {
-  $('log').textContent = '';
-  logOffset = 0;
   if (!$('outputPath').value && $('inputPath').value) {
     $('outputPath').value = defaultOutputStemForInput($('inputPath').value);
   }
-  try {
-    const data = await api('/api/runs', {method:'POST', body: JSON.stringify({input_path:$('inputPath').value, output:$('outputPath').value, fresh:$('fresh').checked})});
-    activeRunId = data.run.id;
-    $('cancelBtn').disabled = false;
-    setStatus('running');
-    if (!timer) timer = setInterval(pollLogs, 1200);
-    pollLogs();
-    refreshRuns();
-  } catch (e) {
-    setStatus(e.error || 'start failed', 'failed');
-    $('currentRun').textContent = e.message || JSON.stringify(e);
-  }
+  await startRunWithPayload({input_path:$('inputPath').value, output:$('outputPath').value, fresh:$('fresh').checked});
 });
 $('pickFileBtn').addEventListener('click', () => chooseLocalPath('input_file'));
 $('pickDirectoryBtn').addEventListener('click', () => chooseLocalPath('input_directory'));
@@ -3816,6 +3855,7 @@ const dropZone = $('inputDropZone');
   event.preventDefault();
 }));
 refreshConfig();
+renderCurrentRun(null);
 refreshRuns();
 </script>
 </body>
