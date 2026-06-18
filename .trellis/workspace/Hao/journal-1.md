@@ -468,3 +468,42 @@ Fixed Web Runner drag-and-drop to prefer full file:// URI paths from DataTransfe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Fix Web Runner basename fallback
+
+**Date**: 2026-06-18
+**Task**: Fix Web Runner basename fallback
+**Branch**: `main`
+
+### Summary
+
+Fixed Web Runner basename fallback to preserve explicit ./ paths and match literal filenames containing glob metacharacters; added regression tests and updated backend Web Runner contract.
+
+### Main Changes
+
+- Preserved explicit relative Web Runner inputs such as `./paper.docx` so they are passed through to the CLI instead of falling back to basename search.
+- Changed recursive basename fallback to compare filename literals, preventing glob metacharacters in legal filenames from matching unrelated files.
+- Added regression tests for `./` paths, bracketed filenames, question-mark filenames, and false glob-pattern matches.
+- Updated the backend Web Runner contract with the basename-only and literal-match requirements.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `96c1a24` | (see git log) |
+
+### Testing
+
+- [OK] `python3 -m py_compile paper_audit.py veritas/*.py tests/test_core.py`
+- [OK] `python3 paper_audit.py --help`
+- [OK] `python3 -m pytest tests/test_core.py -q -k 'web_runner_input_path or web_runner_common_search_roots or web_runner_start_run'`
+- [OK] `python3 -m pytest tests/test_core.py -q`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
