@@ -3542,6 +3542,119 @@ def test_dropped_local_path_from_uri_text_prefers_file_uri():
     assert ignored == ""
 
 
+def test_resolve_web_runner_input_path_finds_unique_basename(tmp_path):
+    project_dir = tmp_path / "Documents" / "Project"
+    project_dir.mkdir(parents=True)
+    paper_path = project_dir / "paper.docx"
+    paper_path.write_text("paper", encoding="utf-8")
+
+    resolved = paper_audit.resolve_web_runner_input_path("paper.docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is True
+    assert resolved["path"] == str(paper_path.resolve())
+    assert resolved["resolved_from"] == "paper.docx"
+
+
+def test_resolve_web_runner_input_path_rejects_missing_basename(tmp_path):
+    resolved = paper_audit.resolve_web_runner_input_path("missing.docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is False
+    assert resolved["error"] == "input_path_not_found"
+
+
+def test_resolve_web_runner_input_path_rejects_ambiguous_basename(tmp_path):
+    first = tmp_path / "Downloads" / "paper.docx"
+    second = tmp_path / "Documents" / "paper.docx"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    resolved = paper_audit.resolve_web_runner_input_path("paper.docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is False
+    assert resolved["error"] == "ambiguous_input_path"
+    assert sorted(Path(item).parent.name for item in resolved["candidates"]) == ["Documents", "Downloads"]
+
+
+def test_resolve_web_runner_input_path_preserves_explicit_missing_path(tmp_path):
+    explicit = tmp_path / "missing" / "paper.docx"
+
+    resolved = paper_audit.resolve_web_runner_input_path(str(explicit), search_roots=[tmp_path])
+
+    assert resolved == {"ok": True, "path": str(explicit)}
+
+
+def test_resolve_web_runner_input_path_preserves_dot_slash_missing_path(tmp_path, monkeypatch):
+    other = tmp_path / "Downloads" / "paper.docx"
+    other.parent.mkdir(parents=True)
+    other.write_text("paper", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    resolved = paper_audit.resolve_web_runner_input_path("./paper.docx", search_roots=[tmp_path])
+
+    assert resolved == {"ok": True, "path": str(Path("./paper.docx"))}
+
+
+def test_resolve_web_runner_input_path_matches_literal_basename_with_brackets(tmp_path):
+    paper_path = tmp_path / "nested" / "paper[1].docx"
+    paper_path.parent.mkdir(parents=True)
+    paper_path.write_text("paper", encoding="utf-8")
+
+    resolved = paper_audit.resolve_web_runner_input_path("paper[1].docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is True
+    assert resolved["path"] == str(paper_path.resolve())
+    assert resolved["resolved_from"] == "paper[1].docx"
+
+
+def test_resolve_web_runner_input_path_does_not_treat_question_mark_as_glob(tmp_path):
+    wildcard_name = tmp_path / "nested" / "paper?.docx"
+    plain_name = tmp_path / "nested" / "paper1.docx"
+    wildcard_name.parent.mkdir(parents=True)
+    wildcard_name.write_text("wild", encoding="utf-8")
+    plain_name.write_text("plain", encoding="utf-8")
+
+    resolved = paper_audit.resolve_web_runner_input_path("paper?.docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is True
+    assert resolved["path"] == str(wildcard_name.resolve())
+    assert resolved["resolved_from"] == "paper?.docx"
+
+
+def test_resolve_web_runner_input_path_does_not_match_glob_pattern_to_different_name(tmp_path):
+    plain_name = tmp_path / "nested" / "paper1.docx"
+    plain_name.parent.mkdir(parents=True)
+    plain_name.write_text("plain", encoding="utf-8")
+
+    resolved = paper_audit.resolve_web_runner_input_path("paper?.docx", search_roots=[tmp_path])
+
+    assert resolved["ok"] is False
+    assert resolved["error"] == "input_path_not_found"
+
+
+def test_web_runner_common_search_roots_keeps_home_nonrecursive(tmp_path):
+    home = tmp_path / "home"
+    cwd = tmp_path / "repo"
+    nested_home = home / "unlisted" / "paper.docx"
+    desktop_file = home / "Desktop" / "paper.docx"
+    cwd_file = cwd / "deep" / "paper.docx"
+    nested_home.parent.mkdir(parents=True)
+    desktop_file.parent.mkdir(parents=True)
+    cwd_file.parent.mkdir(parents=True)
+    nested_home.write_text("home", encoding="utf-8")
+    desktop_file.write_text("desktop", encoding="utf-8")
+    cwd_file.write_text("cwd", encoding="utf-8")
+
+    roots = paper_audit._web_runner_common_search_roots(cwd=cwd, home=home)
+    resolved = paper_audit.resolve_web_runner_input_path("paper.docx", search_roots=roots)
+
+    assert resolved["ok"] is False
+    assert resolved["error"] == "ambiguous_input_path"
+    assert sorted(Path(item).parent.name for item in resolved["candidates"]) == ["Desktop", "deep"]
+    assert str(nested_home) not in resolved["candidates"]
+
+
 def test_web_runner_config_status_does_not_expose_api_keys(monkeypatch):
     cfg = paper_audit.default_runtime_config()
     cfg.text_llm.api_key = "secret-llm-key"
@@ -3634,6 +3747,74 @@ def test_web_runner_start_run_defaults_output_stem(monkeypatch, tmp_path):
     assert "-o" in command
     assert expected_output in command
     assert (tmp_path / "Project Alpha_20260605-153000").is_dir()
+
+
+def test_web_runner_start_run_resolves_basename_before_spawning(monkeypatch, tmp_path):
+    search_root = tmp_path / "Downloads"
+    search_root.mkdir()
+    input_path = search_root / "paper.docx"
+    input_path.write_text("paper", encoding="utf-8")
+    popen_calls = []
+
+    class DummyProcess:
+        pid = 2470
+
+        def __init__(self):
+            self.stdout = io.StringIO("")
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(paper_audit, "_web_runner_common_search_roots", lambda: [tmp_path])
+    monkeypatch.setattr(paper_audit, "_web_runner_timestamp", lambda: "20260605-153000")
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)) or DummyProcess())
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    response, status = state.start_run("paper.docx")
+
+    expected_output = str(search_root / "paper_20260605-153000" / "audit_report")
+    assert status == 200
+    assert response["run"]["input_path"] == str(input_path.resolve())
+    assert response["run"]["output"] == expected_output
+    command = popen_calls[0][0][0]
+    assert command[:3] == [sys.executable, str(paper_audit.Path(__file__).resolve().parents[1] / "paper_audit.py"), str(input_path.resolve())]
+    assert expected_output in command
+
+
+def test_web_runner_start_run_rejects_unresolved_basename_without_spawning(monkeypatch, tmp_path):
+    popen_calls = []
+
+    monkeypatch.setattr(paper_audit, "_web_runner_common_search_roots", lambda: [tmp_path])
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)))
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    response, status = state.start_run("missing.docx")
+
+    assert status == 400
+    assert response["error"] == "input_path_not_found"
+    assert popen_calls == []
+
+
+def test_web_runner_start_run_rejects_ambiguous_basename_without_spawning(monkeypatch, tmp_path):
+    first = tmp_path / "one" / "paper.docx"
+    second = tmp_path / "two" / "paper.docx"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    popen_calls = []
+
+    monkeypatch.setattr(paper_audit, "_web_runner_common_search_roots", lambda: [tmp_path])
+    monkeypatch.setattr(paper_audit.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)))
+    state = paper_audit.WebRunnerState(history_path=tmp_path / "runs.json")
+
+    response, status = state.start_run("paper.docx")
+
+    assert status == 409
+    assert response["error"] == "ambiguous_input_path"
+    assert len(response["candidates"]) == 2
+    assert popen_calls == []
 
 
 def test_web_runner_rejects_second_active_run_and_can_cancel(monkeypatch, tmp_path):

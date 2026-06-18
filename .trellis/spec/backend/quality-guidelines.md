@@ -249,6 +249,22 @@ result = generate_and_save_followup_draft(
   without a separate security review.
 - `POST /api/runs` accepts only `input_path`, optional `output`, and `fresh`.
   The server always adds `--json --no-open`.
+- If `input_path` is only a basename and does not exist in the service current
+  working directory, the server may resolve it before spawning the CLI by doing
+  a bounded local basename search. Search roots are the current working
+  directory tree, the home directory itself without recursion, and common home
+  subdirectories (`Desktop`, `Documents`, `Downloads`, `Videos`, `Pictures`)
+  recursively. Do not add full-disk search or a browsable filesystem API.
+- Basename resolution must happen before default output calculation so omitted
+  output paths are derived from the resolved input's real parent directory.
+- Explicit paths, including absolute missing paths and relative paths with a
+  parent component, must be preserved unchanged and passed to the CLI.
+- Only pure basename inputs may use the fallback search. Inputs containing
+  `./`, `../`, `/`, or `\\` keep their explicit path meaning even when the path
+  does not exist.
+- Recursive fallback search must match filename literals, not glob patterns.
+  Legal filenames containing `[`, `]`, `?`, or `*` must resolve only to exact
+  same-name files.
 - When `output` is omitted, the Web Runner must derive an output stem in the
   input's parent directory as `<project_name>_<YYYYMMDD-HHMMSS>/audit_report`
   and pass it through `-o`.
@@ -282,6 +298,13 @@ result = generate_and_save_followup_draft(
 ### 4. Validation & Error Matrix
 
 - Empty `input_path` -> HTTP 400 `input_path_required`.
+- Basename cannot be resolved -> HTTP 400 `input_path_not_found`, without
+  spawning a subprocess.
+- Basename resolves to multiple candidates -> HTTP 409 `ambiguous_input_path`
+  with a small `candidates` list, without spawning a subprocess.
+- Explicit relative missing paths such as `./paper.docx` -> preserve the path
+  and let the CLI return its normal missing-path failure; do not convert the
+  request into basename search.
 - Active run exists -> HTTP 409 `busy`.
 - Subprocess spawn failure -> HTTP 500 `start_failed`.
 - Output directory creation failure -> HTTP 500 `output_prepare_failed`.
@@ -312,6 +335,12 @@ result = generate_and_save_followup_draft(
   directory-entry support, and `preventDefault()` navigation guard.
 - Unit tests assert `file://` URI-list payloads decode to full local paths.
 - Unit tests assert default output stem mapping and picker helper behavior.
+- Unit tests assert basename-only inputs resolve when there is exactly one
+  match, reject missing basenames with `input_path_not_found`, reject duplicate
+  basenames with `ambiguous_input_path`, preserve explicit paths, and pass the
+  resolved path to the subprocess command.
+- Unit tests assert `./paper.docx` remains an explicit path and filenames with
+  glob metacharacters are matched literally during fallback search.
 - Workbench tests assert current-run output/actions and retry helpers are
   rendered.
 - Config API/status does not serialize secret key values.
@@ -327,16 +356,16 @@ result = generate_and_save_followup_draft(
 #### Wrong
 
 ```python
-return Path(request.query["path"]).read_bytes()
+command = [sys.executable, "paper_audit.py", input_path, "--json", "--no-open"]
 ```
 
 #### Correct
 
 ```python
-target, error = state.artifact_target(run_id, kind)
-if error:
-    return {"ok": False, "error": error}, 404
-return Path(target).read_bytes()
+resolved = resolve_web_runner_input_path(input_path)
+if not resolved["ok"]:
+    return resolved, 409 if resolved["error"] == "ambiguous_input_path" else 400
+command = [sys.executable, "paper_audit.py", resolved["path"], "--json", "--no-open"]
 ```
 
 ## Scenario: Direct Single-File Text Extraction
