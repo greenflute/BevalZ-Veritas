@@ -540,3 +540,36 @@ Built and verified a local Web Runner UI flow that starts audits, shows report s
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Add native desktop GUI launcher
+
+**Date**: 2026-06-19
+**Task**: Add native desktop GUI launcher
+**Branch**: `main`
+
+### Summary
+
+Added a tkinter desktop GUI launched by --gui or veritas-gui, reusing WebRunnerState for audit runs, logs, cancellation, summaries, and report artifact opening.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e8595ff` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

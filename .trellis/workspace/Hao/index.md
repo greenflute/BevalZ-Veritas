@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-06-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~542 | Active |
+| `journal-1.md` | ~575 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-06-19 | Add native desktop GUI launcher | `e8595ff` | `main` |
 | 16 | 2026-06-19 | Productize Web Runner report output | `39d35d3` | `main` |
 | 15 | 2026-06-18 | Fix Web Runner basename fallback | `96c1a24` | `main` |
 | 14 | 2026-06-05 | Web Runner Dropped Path Fix | `339d3a7` | `main` |
