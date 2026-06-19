@@ -385,6 +385,89 @@ if not resolved["ok"]:
 command = [sys.executable, "paper_audit.py", resolved["path"], "--json", "--no-open"]
 ```
 
+## Scenario: Local Desktop GUI Contract
+
+### 1. Scope / Trigger
+
+- Trigger: A native desktop window starts real audit runs and exposes generated
+  report outputs without requiring the user to open a browser.
+- Applies to `python paper_audit.py --gui` and the installed `veritas-gui`
+  console script.
+
+### 2. Signatures
+
+- CLI:
+  - `python paper_audit.py --gui`
+  - `veritas-gui`
+- Entry points:
+  - `gui_main() -> int`
+  - `run_desktop_gui(history_path=None) -> int`
+  - `desktop_gui_start_run(state, input_path, output="", fresh=False)`
+  - `desktop_gui_run_summary(run) -> dict`
+
+### 3. Contracts
+
+- The desktop GUI must be a native window, not a localhost browser page.
+- The desktop GUI must reuse `WebRunnerState` for run start, cancellation,
+  log polling, artifact discovery, summary extraction, and single-active-run
+  behavior.
+- The GUI may use `tkinter` because it is already a stdlib dependency used by
+  path pickers; do not add Qt/Electron/Tauri/PyWebView without a separate
+  dependency and packaging review.
+- Empty output means "let `WebRunnerState` derive the output stem"; user-selected
+  output directories should pass an explicit `<directory>/audit_report` stem.
+- GUI config status may show readiness booleans and missing field names, but
+  must not show raw API keys or secret values.
+- Report actions exposed by the GUI are limited to recorded `html`,
+  `markdown`, `json`, and `folder` artifact paths.
+
+### 4. Validation & Error Matrix
+
+- `tkinter` import failure -> return non-zero and print a concise
+  `tkinter 不可用` message.
+- No display server (`TclError: no display name`) -> return non-zero and print
+  a concise GUI startup failure.
+- Empty input path from GUI -> show an in-window error and do not call
+  `start_run`.
+- `WebRunnerState.start_run` returns validation or busy errors -> surface the
+  backend message in the GUI.
+- Artifact open failure -> show an in-window error.
+
+### 5. Good/Base/Bad Cases
+
+- Good: User runs `python paper_audit.py --gui`, selects a PDF, starts an
+  audit, watches logs, then clicks `打开 HTML`.
+- Base: User runs the command on a headless machine; it exits cleanly with a
+  display-related message instead of crashing.
+- Bad: GUI creates a second subprocess orchestration path or exposes arbitrary
+  filesystem paths unrelated to recorded artifacts.
+
+### 6. Tests Required
+
+- CLI help exposes `--gui`.
+- `--gui` loads runtime config and routes through `gui_main` /
+  `run_desktop_gui` without requiring a real window in tests.
+- `pyproject.toml` declares `veritas-gui = "veritas.legacy:gui_main"`.
+- Desktop helper tests assert blank output becomes `None` before calling
+  `WebRunnerState.start_run`.
+- Desktop helper tests assert only `html`, `markdown`, `json`, and `folder`
+  artifacts are surfaced from run summaries.
+- Full `tests/test_core.py` must still pass without opening a real window.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+subprocess.Popen([sys.executable, "paper_audit.py", input_path])
+```
+
+#### Correct
+
+```python
+result, status = desktop_gui_start_run(self.state, input_path, output, fresh)
+```
+
 ## Scenario: Direct Single-File Text Extraction
 
 ### 1. Scope / Trigger

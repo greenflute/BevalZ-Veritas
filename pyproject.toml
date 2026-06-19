@@ -22,6 +22,7 @@ test = [
 
 [project.scripts]
 paper-audit = "paper_audit:main"
+veritas-gui = "veritas.legacy:gui_main"
 
 [tool.setuptools]
 py-modules = ["paper_audit"]

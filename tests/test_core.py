@@ -126,6 +126,44 @@ def test_web_runner_service_mode_loads_runtime_config(monkeypatch):
     }
 
 
+def test_desktop_gui_mode_loads_runtime_config(monkeypatch):
+    fake_config = types.SimpleNamespace(
+        LLM_API_KEY="llm-key",
+        LLM_API_URL="https://llm.example.test/v1/chat/completions",
+        LLM_MODEL="model-x",
+        MINERU_TOKEN="mineru-token",
+        MINERU_BASE="https://mineru.example.test",
+        IMAGE_SEMANTIC_API_KEY="vision-key",
+        IMAGE_SEMANTIC_API_URL="https://vision.example.test/chat",
+        IMAGE_SEMANTIC_MODEL="vision-x",
+        LLM_TIMEOUT=12,
+        LLM_RETRIES=3,
+    )
+    captured = {}
+
+    monkeypatch.setattr(paper_audit.importlib, "import_module", lambda name: fake_config)
+    monkeypatch.setattr(sys, "argv", ["paper_audit.py", "--gui"])
+
+    def fake_run_desktop_gui():
+        captured["llm_api_key"] = paper_audit.LLM_API_KEY
+        captured["llm_model"] = paper_audit.LLM_MODEL
+        return 0
+
+    monkeypatch.setattr(paper_audit, "run_desktop_gui", fake_run_desktop_gui)
+
+    assert paper_audit.main() == 0
+    assert captured == {
+        "llm_api_key": "llm-key",
+        "llm_model": "model-x",
+    }
+
+
+def test_desktop_gui_console_script_is_declared():
+    pyproject = (paper_audit.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'veritas-gui = "veritas.legacy:gui_main"' in pyproject
+
+
 def test_chat_completions_endpoint_accepts_base_or_full_url():
     assert paper_audit._chat_completions_endpoint("https://llm.example.test/v1") == "https://llm.example.test/v1/chat/completions"
     assert paper_audit._chat_completions_endpoint("https://llm.example.test/v1/") == "https://llm.example.test/v1/chat/completions"
@@ -2720,6 +2758,7 @@ def test_cli_help_exposes_no_open():
     assert "不再打开网页或要求手动上传" in result.stdout
     assert "--serve-report-actions" in result.stdout
     assert "--serve-web" in result.stdout
+    assert "--gui" in result.stdout
     assert "--web-port" in result.stdout
     assert "--llm-provider" not in result.stdout
     assert "--ignore-config-llm" not in result.stdout
@@ -3998,6 +4037,55 @@ def test_web_runner_failed_artifact_summary_is_exposed(tmp_path):
     assert run["summary"]["failure_error"] == "missing_required_config"
     assert run["summary"]["summary"] == "缺少LLM配置"
     assert run["summary"]["complete_report_generated"] is False
+
+
+def test_desktop_gui_start_run_reuses_web_runner_state():
+    class FakeState:
+        def __init__(self):
+            self.calls = []
+
+        def start_run(self, input_path, output=None, fresh=False):
+            self.calls.append({"input_path": input_path, "output": output, "fresh": fresh})
+            return {"ok": True, "run": {"id": "run-1"}}, 200
+
+    state = FakeState()
+
+    result, status = paper_audit.desktop_gui_start_run(state, "/tmp/paper.pdf", "", True)
+
+    assert status == 200
+    assert result["run"]["id"] == "run-1"
+    assert state.calls == [{"input_path": "/tmp/paper.pdf", "output": None, "fresh": True}]
+
+
+def test_desktop_gui_run_summary_exposes_report_outputs_without_extra_keys():
+    run = {
+        "status": "succeeded",
+        "input_path": "/tmp/paper.pdf",
+        "output": "/tmp/out/audit_report",
+        "report_type": "complete",
+        "message": "审查完成",
+        "summary": {"report_type": "complete", "risk_level": "低", "summary": "ok"},
+        "artifacts": {
+            "html": "/tmp/out/audit_report.audit.html",
+            "markdown": "/tmp/out/audit_report.audit.md",
+            "json": "/tmp/out/audit_report.audit.json",
+            "folder": "/tmp/out",
+            "secret": "/tmp/secret.txt",
+        },
+    }
+
+    summary = paper_audit.desktop_gui_run_summary(run)
+
+    assert summary["status"] == "succeeded"
+    assert summary["report_type"] == "complete"
+    assert summary["risk_level"] == "低"
+    assert summary["summary"] == "ok"
+    assert summary["artifacts"] == {
+        "html": "/tmp/out/audit_report.audit.html",
+        "markdown": "/tmp/out/audit_report.audit.md",
+        "json": "/tmp/out/audit_report.audit.json",
+        "folder": "/tmp/out",
+    }
 
 
 def test_report_action_context_cleans_reference_issue_text():

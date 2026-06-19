@@ -3653,6 +3653,286 @@ class WebRunnerState:
         return path, ""
 
 
+DESKTOP_GUI_ARTIFACT_LABELS = {
+    "html": "打开 HTML",
+    "markdown": "打开 Markdown",
+    "json": "打开 JSON",
+    "folder": "打开输出目录",
+}
+
+
+def desktop_gui_run_summary(run):
+    run = run or {}
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    report_type = summary.get("report_type") or run.get("report_type") or run.get("status") or ""
+    return {
+        "status": run.get("status") or "idle",
+        "input_path": run.get("input_path") or "",
+        "output": run.get("output") or "",
+        "report_type": report_type,
+        "risk_level": summary.get("risk_level") or "",
+        "summary": summary.get("summary") or run.get("message") or "",
+        "artifacts": {k: v for k, v in (run.get("artifacts") or {}).items() if k in DESKTOP_GUI_ARTIFACT_LABELS and v},
+    }
+
+
+def desktop_gui_start_run(state, input_path, output="", fresh=False):
+    output_text = str(output or "").strip()
+    return state.start_run(input_path, output=output_text or None, fresh=bool(fresh))
+
+
+def open_desktop_path(path):
+    target = Path(path).expanduser().resolve()
+    webbrowser.open(target.as_uri())
+
+
+class DesktopGuiApp:
+    """Native tkinter shell around the same local run state used by Web Runner."""
+
+    def __init__(self, root, state=None, tk_module=None, ttk_module=None, filedialog_module=None, messagebox_module=None, opener=None):
+        self.root = root
+        self.state = state or WebRunnerState()
+        self.tk = tk_module
+        self.ttk = ttk_module
+        self.filedialog = filedialog_module
+        self.messagebox = messagebox_module
+        self.opener = opener or open_desktop_path
+        self.active_run_id = None
+        self.last_run = None
+        self.log_offset = 0
+        self.artifact_paths = {}
+        self._build()
+        self.refresh_config()
+        self.refresh_runs()
+
+    def _build(self):
+        tk = self.tk
+        ttk = self.ttk
+        self.root.title("Veritas 审查报告 GUI")
+        self.root.geometry("1080x720")
+        self.root.minsize(860, 600)
+
+        self.input_var = tk.StringVar()
+        self.output_var = tk.StringVar()
+        self.fresh_var = tk.BooleanVar(value=False)
+        self.status_var = tk.StringVar(value="idle")
+        self.report_type_var = tk.StringVar(value="待生成")
+        self.risk_var = tk.StringVar(value="待生成")
+        self.summary_var = tk.StringVar(value="选择输入后点击开始审查。")
+
+        main = ttk.Frame(self.root, padding=12)
+        main.pack(fill=tk.BOTH, expand=True)
+        main.columnconfigure(0, weight=0)
+        main.columnconfigure(1, weight=1)
+        main.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(main)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        right = ttk.Frame(main)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.rowconfigure(4, weight=1)
+        right.columnconfigure(0, weight=1)
+
+        ttk.Label(left, text="Veritas 桌面审查", font=("", 16, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(left, text="输入路径").pack(anchor=tk.W)
+        ttk.Entry(left, textvariable=self.input_var, width=48).pack(fill=tk.X, pady=(2, 6))
+        input_buttons = ttk.Frame(left)
+        input_buttons.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(input_buttons, text="选择文件", command=self.choose_file).pack(side=tk.LEFT)
+        ttk.Button(input_buttons, text="选择目录", command=self.choose_directory).pack(side=tk.LEFT, padx=(8, 0))
+
+        ttk.Label(left, text="输出目录（可选）").pack(anchor=tk.W)
+        ttk.Entry(left, textvariable=self.output_var, width=48).pack(fill=tk.X, pady=(2, 6))
+        output_buttons = ttk.Frame(left)
+        output_buttons.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(output_buttons, text="选择输出目录", command=self.choose_output_directory).pack(side=tk.LEFT)
+        ttk.Button(output_buttons, text="清空输出", command=lambda: self.output_var.set("")).pack(side=tk.LEFT, padx=(8, 0))
+
+        ttk.Checkbutton(left, text="从头重跑（清空断点续作缓存）", variable=self.fresh_var).pack(anchor=tk.W, pady=(0, 10))
+        action_buttons = ttk.Frame(left)
+        action_buttons.pack(fill=tk.X, pady=(0, 12))
+        self.start_button = ttk.Button(action_buttons, text="开始审查", command=self.start_run)
+        self.start_button.pack(side=tk.LEFT)
+        self.cancel_button = ttk.Button(action_buttons, text="取消", command=self.cancel_run, state=tk.DISABLED)
+        self.cancel_button.pack(side=tk.LEFT, padx=(8, 0))
+        self.retry_button = ttk.Button(action_buttons, text="重试", command=self.retry_run, state=tk.DISABLED)
+        self.retry_button.pack(side=tk.LEFT, padx=(8, 0))
+
+        ttk.Separator(left).pack(fill=tk.X, pady=10)
+        ttk.Label(left, text="配置状态", font=("", 11, "bold")).pack(anchor=tk.W)
+        self.config_text = tk.Text(left, height=10, width=48, wrap=tk.WORD)
+        self.config_text.pack(fill=tk.BOTH, expand=False, pady=(4, 6))
+        self.config_text.configure(state=tk.DISABLED)
+        ttk.Button(left, text="刷新配置", command=self.refresh_config).pack(anchor=tk.W)
+
+        ttk.Label(right, textvariable=self.status_var, font=("", 13, "bold")).grid(row=0, column=0, sticky=tk.W)
+        report = ttk.LabelFrame(right, text="报告输出", padding=8)
+        report.grid(row=1, column=0, sticky="ew", pady=(10, 8))
+        report.columnconfigure(1, weight=1)
+        ttk.Label(report, text="报告类型").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(report, textvariable=self.report_type_var).grid(row=0, column=1, sticky=tk.W, padx=(8, 0))
+        ttk.Label(report, text="风险级别").grid(row=1, column=0, sticky=tk.W)
+        ttk.Label(report, textvariable=self.risk_var).grid(row=1, column=1, sticky=tk.W, padx=(8, 0))
+        ttk.Label(report, text="摘要").grid(row=2, column=0, sticky=tk.NW)
+        ttk.Label(report, textvariable=self.summary_var, wraplength=620).grid(row=2, column=1, sticky=tk.W, padx=(8, 0))
+
+        artifact_frame = ttk.Frame(right)
+        artifact_frame.grid(row=2, column=0, sticky=tk.W, pady=(0, 8))
+        self.artifact_buttons = {}
+        for kind, label in DESKTOP_GUI_ARTIFACT_LABELS.items():
+            button = ttk.Button(artifact_frame, text=label, command=lambda k=kind: self.open_artifact(k), state=tk.DISABLED)
+            button.pack(side=tk.LEFT, padx=(0, 8))
+            self.artifact_buttons[kind] = button
+
+        ttk.Label(right, text="运行日志").grid(row=3, column=0, sticky=tk.W)
+        self.log_text = tk.Text(right, height=24, wrap=tk.WORD)
+        self.log_text.grid(row=4, column=0, sticky="nsew")
+
+    def _set_text(self, widget, text):
+        widget.configure(state=self.tk.NORMAL)
+        widget.delete("1.0", self.tk.END)
+        widget.insert(self.tk.END, text)
+        widget.configure(state=self.tk.DISABLED)
+
+    def choose_file(self):
+        selected = self.filedialog.askopenfilename(title="选择审查文件")
+        if selected:
+            self.input_var.set(str(Path(selected).expanduser()))
+
+    def choose_directory(self):
+        selected = self.filedialog.askdirectory(title="选择审查目录", mustexist=True)
+        if selected:
+            self.input_var.set(str(Path(selected).expanduser()))
+
+    def choose_output_directory(self):
+        selected = self.filedialog.askdirectory(title="选择输出目录", mustexist=False)
+        if selected:
+            self.output_var.set(str(Path(selected).expanduser() / "audit_report"))
+
+    def refresh_config(self):
+        try:
+            config = web_runner_config_status()
+            lines = []
+            for name, capability in (config.get("capabilities") or {}).items():
+                status = "ready" if capability.get("ok") else "needs config"
+                missing = ", ".join(str(item) for item in capability.get("missing") or [])
+                lines.append(f"{name}: {status}" + (f" ({missing})" if missing else ""))
+            deps = config.get("optional_dependencies") or {}
+            for name, ok in deps.items():
+                lines.append(f"{name}: {'available' if ok else 'missing'}")
+            self._set_text(self.config_text, "\n".join(lines) or "配置状态不可用")
+        except Exception as e:
+            self._set_text(self.config_text, f"{type(e).__name__}: {_brief_text(str(e), 240)}")
+
+    def refresh_runs(self):
+        runs = self.state.list_runs()
+        running = next((run for run in runs if run.get("status") == "running"), None)
+        if running and not self.active_run_id:
+            self.active_run_id = running.get("id")
+            self.log_offset = 0
+            self.poll_run()
+
+    def start_run(self):
+        input_path = self.input_var.get().strip()
+        if not input_path:
+            self.messagebox.showerror("缺少输入", "请选择审查文件或目录。")
+            return
+        result, status = desktop_gui_start_run(self.state, input_path, self.output_var.get(), self.fresh_var.get())
+        run = result.get("run") if isinstance(result, dict) else None
+        if status != 200 or not run:
+            message = result.get("message") or result.get("error") or "启动失败"
+            self.status_var.set(message)
+            self.messagebox.showerror("启动失败", message)
+            return
+        self.active_run_id = run.get("id")
+        self.last_run = run
+        self.log_offset = 0
+        self.start_button.configure(state=self.tk.DISABLED)
+        self.cancel_button.configure(state=self.tk.NORMAL)
+        self.retry_button.configure(state=self.tk.DISABLED)
+        self.log_text.delete("1.0", self.tk.END)
+        self.render_run(run)
+        self.poll_run()
+
+    def cancel_run(self):
+        if not self.active_run_id:
+            return
+        self.state.cancel_run(self.active_run_id)
+        self.poll_run()
+
+    def retry_run(self):
+        run = self.last_run or {}
+        input_path = run.get("input_path") or self.input_var.get()
+        if not input_path:
+            return
+        self.input_var.set(input_path)
+        self.output_var.set(run.get("output") or self.output_var.get())
+        self.fresh_var.set(bool(run.get("fresh")))
+        self.start_run()
+
+    def poll_run(self):
+        if not self.active_run_id:
+            return
+        logs = self.state.logs_since(self.active_run_id, self.log_offset)
+        if logs:
+            self.log_offset = logs.get("offset", self.log_offset)
+            for line in logs.get("lines") or []:
+                self.log_text.insert(self.tk.END, str(line) + "\n")
+            self.log_text.see(self.tk.END)
+        run = self.state.get_run(self.active_run_id)
+        if run:
+            self.render_run(run)
+            if run.get("status") != "running":
+                self.active_run_id = None
+                self.start_button.configure(state=self.tk.NORMAL)
+                self.cancel_button.configure(state=self.tk.DISABLED)
+                self.retry_button.configure(state=self.tk.NORMAL if run.get("input_path") else self.tk.DISABLED)
+                return
+        self.root.after(1000, self.poll_run)
+
+    def render_run(self, run):
+        self.last_run = run or self.last_run
+        view = desktop_gui_run_summary(run)
+        self.status_var.set(f"状态: {view['status']}")
+        self.report_type_var.set(view["report_type"] or "待生成")
+        self.risk_var.set(view["risk_level"] or "未标注")
+        self.summary_var.set(view["summary"] or "报告生成后会显示摘要。")
+        self.artifact_paths = view["artifacts"]
+        for kind, button in self.artifact_buttons.items():
+            button.configure(state=self.tk.NORMAL if kind in self.artifact_paths else self.tk.DISABLED)
+
+    def open_artifact(self, kind):
+        path = self.artifact_paths.get(kind)
+        if not path:
+            return
+        try:
+            self.opener(path)
+        except Exception as e:
+            self.messagebox.showerror("打开失败", f"{type(e).__name__}: {_brief_text(str(e), 240)}")
+
+
+def run_desktop_gui(history_path=None):
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox, ttk
+    except Exception as e:
+        print(f"无法启动桌面 GUI：tkinter 不可用: {type(e).__name__}: {_brief_text(str(e), 240)}")
+        return 1
+    try:
+        root = tk.Tk()
+        DesktopGuiApp(root, state=WebRunnerState(history_path=history_path), tk_module=tk, ttk_module=ttk, filedialog_module=filedialog, messagebox_module=messagebox)
+        root.mainloop()
+        return 0
+    except Exception as e:
+        print(f"无法启动桌面 GUI：{type(e).__name__}: {_brief_text(str(e), 240)}")
+        return 1
+
+
+def gui_main():
+    apply_runtime_config(load_runtime_config())
+    return run_desktop_gui()
+
+
 def render_web_runner_page():
     return """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -11992,6 +12272,8 @@ def main():
                         help="HTML报告动作服务端口（默认8765，仅监听127.0.0.1）")
     parser.add_argument("--serve-web", action="store_true",
                         help="启动本机Web Runner工作台：通过浏览器运行审查、查看日志和打开产物")
+    parser.add_argument("--gui", action="store_true",
+                        help="启动本机桌面GUI软件：选择输入、运行审查并直接打开报告产物")
     parser.add_argument("--web-port", type=int, default=8765,
                         help="Web Runner端口（默认8765，仅监听127.0.0.1）")
     parser.add_argument("--update-patterns", metavar="COMMENTS_FILE", 
@@ -12069,10 +12351,12 @@ def main():
     if args.serve_web:
         apply_runtime_config(load_runtime_config())
         return serve_web_runner(port=args.web_port, open_browser=not args.no_open)
+    if args.gui:
+        return gui_main()
 
     # ─── 正常审查模式 ───
     if not args.pdf_path:
-        parser.error("审查模式需要提供path参数（文件或目录，或使用 --update-patterns / --serve-web 更新知识库或启动服务）")
+        parser.error("审查模式需要提供path参数（文件或目录，或使用 --update-patterns / --serve-web / --gui 更新知识库或启动服务）")
 
     run_request = RunRequest.from_args(args)
     return run_audit(run_request, args).exit_code
