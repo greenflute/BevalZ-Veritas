@@ -507,3 +507,36 @@ Fixed Web Runner basename fallback to preserve explicit ./ paths and match liter
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Productize Web Runner report output
+
+**Date**: 2026-06-19
+**Task**: Productize Web Runner report output
+**Branch**: `main`
+
+### Summary
+
+Built and verified a local Web Runner UI flow that starts audits, shows report summary metadata, and opens generated artifacts directly.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `39d35d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
