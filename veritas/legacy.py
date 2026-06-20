@@ -1314,6 +1314,7 @@ class RunRequest:
     reference_timeout: int = 10
     no_resource_online: bool = False
     resource_timeout: int = 10
+    image_audit_limit: int = None
     no_image_semantic: bool = False
     image_semantic_limit: int = None
     image_semantic_timeout: int = 45
@@ -1328,6 +1329,7 @@ class RunRequest:
     llm_cache_only: bool = False
     ai_detect: bool = False
     image_detect: bool = False
+    report_actions_port: int = 8765
 
     @classmethod
     def from_args(cls, args) -> "RunRequest":
@@ -1346,6 +1348,7 @@ class RunRequest:
             reference_timeout=int(getattr(args, "reference_timeout", 10)),
             no_resource_online=bool(getattr(args, "no_resource_online", False)),
             resource_timeout=int(getattr(args, "resource_timeout", 10)),
+            image_audit_limit=getattr(args, "image_audit_limit", None),
             no_image_semantic=bool(getattr(args, "no_image_semantic", False)),
             image_semantic_limit=getattr(args, "image_semantic_limit", None),
             image_semantic_timeout=int(getattr(args, "image_semantic_timeout", 45)),
@@ -1360,6 +1363,42 @@ class RunRequest:
             llm_cache_only=bool(getattr(args, "llm_cache_only", False)),
             ai_detect=bool(getattr(args, "ai_detect", False)),
             image_detect=bool(getattr(args, "image_detect", False)),
+            report_actions_port=int(getattr(args, "report_actions_port", 8765)),
+        )
+
+    def to_args(self) -> argparse.Namespace:
+        """Build the legacy argparse-shaped namespace required by the current engine."""
+        return argparse.Namespace(
+            pdf_path=str(self.input_path),
+            output=self.output,
+            json=self.json_output,
+            no_open=self.no_open,
+            mineru=self.mineru,
+            no_mineru=self.no_mineru,
+            mineru_model=self.mineru_model,
+            mineru_lang=self.mineru_lang,
+            max_chars=self.max_chars,
+            no_reference_online=self.no_reference_online,
+            reference_online_limit=self.reference_online_limit,
+            reference_timeout=self.reference_timeout,
+            no_resource_online=self.no_resource_online,
+            resource_timeout=self.resource_timeout,
+            image_audit_limit=self.image_audit_limit,
+            no_image_semantic=self.no_image_semantic,
+            image_semantic_limit=self.image_semantic_limit,
+            image_semantic_timeout=self.image_semantic_timeout,
+            no_image_detector=self.no_image_detector,
+            image_detector_limit=self.image_detector_limit,
+            image_detector_timeout=self.image_detector_timeout,
+            no_resume=self.no_resume,
+            fresh=self.fresh,
+            llm_timeout=self.llm_timeout,
+            llm_retries=self.llm_retries,
+            strict_failed_chunks=self.strict_failed_chunks,
+            llm_cache_only=self.llm_cache_only,
+            ai_detect=self.ai_detect,
+            image_detect=self.image_detect,
+            report_actions_port=self.report_actions_port,
         )
 
 
@@ -11986,8 +12025,9 @@ def _failed_artifact_options(input_path: Path, output_dir: Path, args) -> Dict[s
     return {"output_dir": base.parent, "output_stem": base.name}
 
 
-def run_audit(run_request: RunRequest, args) -> RunResult:
+def run_audit(run_request: RunRequest, args=None) -> RunResult:
     global _RESUME_EVENTS_ENABLED
+    args = args if args is not None else run_request.to_args()
     input_path = run_request.input_path
     if not input_path.exists():
         print(f"❌ 路径不存在: {input_path}")

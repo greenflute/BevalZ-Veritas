@@ -431,6 +431,7 @@ def test_run_request_maps_argparse_values():
         reference_timeout=3,
         no_resource_online=True,
         resource_timeout=9,
+        image_audit_limit=8,
         no_image_semantic=True,
         image_semantic_limit=4,
         image_semantic_timeout=5,
@@ -445,9 +446,11 @@ def test_run_request_maps_argparse_values():
         llm_cache_only=True,
         ai_detect=False,
         image_detect=False,
+        report_actions_port=8766,
     )
 
     request = paper_audit.RunRequest.from_args(args)
+    legacy_args = request.to_args()
 
     assert request.input_path == Path("paper.pdf")
     assert request.output == "out.md"
@@ -458,9 +461,15 @@ def test_run_request_maps_argparse_values():
     assert request.no_reference_online is True
     assert request.no_resource_online is True
     assert request.resource_timeout == 9
+    assert request.image_audit_limit == 8
     assert request.fresh is True
     assert request.llm_timeout == 11
     assert request.strict_failed_chunks is True
+    assert request.report_actions_port == 8766
+    assert legacy_args.pdf_path == "paper.pdf"
+    assert legacy_args.json is True
+    assert legacy_args.image_audit_limit == 8
+    assert legacy_args.report_actions_port == 8766
 
 
 def _minimal_run_args(input_path, output_path):
@@ -532,7 +541,7 @@ def test_run_audit_accepts_direct_docx_file_input(monkeypatch, tmp_path):
         "images": [],
     })
 
-    result = paper_audit.run_audit(paper_audit.RunRequest.from_args(args), args)
+    result = paper_audit.run_audit(paper_audit.RunRequest.from_args(args))
 
     assert result.outcome == "complete"
     assert calls["file_path"] == docx_path
