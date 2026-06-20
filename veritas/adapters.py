@@ -1,7 +1,6 @@
 """External audit capability adapter boundary."""
 
 from .legacy import (
-    AdapterResult,
     AuditAdapters,
     ProductionImageDetectorAdapter,
     ProductionImageSemanticAdapter,
@@ -11,6 +10,7 @@ from .legacy import (
     default_audit_adapters,
     fake_audit_adapters,
 )
+from .adapter_types import AdapterResult
 
 __all__ = [
     "AdapterResult",

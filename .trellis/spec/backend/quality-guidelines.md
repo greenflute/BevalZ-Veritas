@@ -894,3 +894,73 @@ from veritas.legacy import RuntimeConfig
 ```python
 from veritas.runtime_config import RuntimeConfig
 ```
+
+## Scenario: Adapter Result Seam
+
+### 1. Scope / Trigger
+
+- Trigger: Any external audit capability adapter reports success, failure, or
+  skipped status to orchestration code.
+- This applies to production adapters, fake adapters, adapter-driven tests, and
+  failed diagnostic conversion.
+
+### 2. Signatures
+
+- `veritas.adapter_types.AdapterResult`
+- `AdapterResult.success(value=None, details=None) -> AdapterResult`
+- `AdapterResult.failure(error_class, message, details=None) -> AdapterResult`
+- `AdapterResult.skipped(reason, message, details=None) -> AdapterResult`
+- `AdapterResult.to_dict() -> dict`
+
+### 3. Contracts
+
+- `AdapterResult` lives in `veritas/adapter_types.py`, not inside
+  `veritas/legacy.py`.
+- `paper_audit.AdapterResult`, `veritas.adapters.AdapterResult`, and
+  `veritas.adapter_types.AdapterResult` must remain the same class object.
+- `status == "success"` is the only truthy `ok` state.
+- Failure and skipped results must carry `error_class`, `message`, and
+  structured `details` without requiring callers to inspect provider-specific
+  payloads.
+- Production and fake adapter classes may remain in the legacy compatibility
+  layer while they depend on legacy provider functions, but they must return
+  the stable `AdapterResult` type.
+
+### 4. Validation & Error Matrix
+
+- Provider auth failure -> `AdapterResult.failure("provider_auth_failed", ...)`.
+- Provider/network outage -> `AdapterResult.failure("provider_unavailable", ...)`.
+- Unsupported content or intentionally skipped work -> `AdapterResult.skipped(...)`.
+- Successful provider response -> `AdapterResult.success(value, details)`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Adapter-driven audit harness can fail a capability using only
+  `AdapterResult` fields and emit failed diagnostics.
+- Base: Production adapters wrap injected test functions without monkeypatching
+  module globals.
+- Bad: A provider-specific dict with `status == "error"` leaks through as a
+  successful result and forces orchestration code to know provider schemas.
+
+### 6. Tests Required
+
+- Unit test success/failure/skipped constructors and `ok` semantics.
+- Unit test fake adapters simulate auth, network, rate-limit, schema, and
+  unsupported-content modes.
+- Unit test production adapters wrap injected functions into `AdapterResult`.
+- Package-boundary test asserts compatibility exports refer to the same
+  `AdapterResult` class object.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+return {"status": "error", "reason": "provider_unavailable"}
+```
+
+#### Correct
+
+```python
+return AdapterResult.failure("provider_unavailable", "provider request failed")
+```
