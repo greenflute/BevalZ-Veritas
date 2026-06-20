@@ -11,9 +11,9 @@ from .legacy import (
     ImageAuditModel,
     ReferenceAuditModel,
     RunMetadataModel,
-    RunRequest,
     RunResult,
 )
+from .run_types import RunRequest
 
 
 def _as_str(value: Any) -> str:

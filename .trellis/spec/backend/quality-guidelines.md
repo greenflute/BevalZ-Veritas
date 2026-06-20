@@ -739,3 +739,72 @@ report["risk_level"] = "严重证据冲突" if evidence_chain_audit["strong_coun
 report = apply_risk_rules(report, stat_result=stat_result, image_audit=meta.get("image_audit"))
 meta["evidence_chain_audit"] = build_evidence_chain_audit(full_text, file_entries, report, meta, stat_result)
 ```
+
+## Scenario: Audit Run Request Seam
+
+### 1. Scope / Trigger
+
+- Trigger: CLI, Web Runner, or desktop GUI code needs to start a formal audit run.
+- This applies to the stable request object that crosses entry-point seams before
+  entering the legacy audit engine.
+
+### 2. Signatures
+
+- `veritas.run_types.RunRequest`
+- `RunRequest.from_args(args) -> RunRequest`
+- `RunRequest.to_args() -> argparse.Namespace`
+- `run_audit(run_request: RunRequest, args=None) -> RunResult`
+
+### 3. Contracts
+
+- `RunRequest` lives in `veritas/run_types.py`, not inside `veritas/legacy.py`.
+- `paper_audit.RunRequest`, `veritas.run.RunRequest`, and
+  `veritas.run_types.RunRequest` must remain the same class object for backward
+  compatibility.
+- `RunRequest` must carry every option needed by the current engine, including
+  output path, JSON output, resume/fresh flags, all reference/resource/image
+  limits, LLM timeout/retry flags, and report action port.
+- `run_audit(request)` must work without callers passing an argparse namespace.
+  The temporary legacy namespace is created only inside the run seam.
+
+### 4. Validation & Error Matrix
+
+- Missing `pdf_path` in `from_args` -> caller/parser error before constructing
+  a formal run request.
+- Unknown optional argparse fields -> use safe defaults matching CLI defaults.
+- Omitted `args` in `run_audit` -> use `RunRequest.to_args()`.
+- Existing callers passing both `run_request` and `args` -> still supported
+  during legacy migration.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Web Runner resolves a dropped file, builds a `RunRequest`, and starts
+  `run_audit(request)` without knowing the legacy namespace shape.
+- Base: CLI parses arguments, builds `RunRequest.from_args(args)`, and existing
+  behavior is unchanged.
+- Bad: A new GUI option is added only to argparse and not to `RunRequest`, so
+  GUI/Web runs silently ignore it.
+
+### 6. Tests Required
+
+- Unit test `RunRequest.from_args()` maps every current CLI/Web/GUI run option.
+- Unit test `RunRequest.to_args()` preserves legacy field names such as `json`.
+- Integration-style unit test calls `run_audit(RunRequest.from_args(args))`
+  without passing `args`.
+- Package-boundary test asserts all compatibility exports refer to the same
+  `RunRequest` class object.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+result = run_audit(RunRequest.from_args(args), args)
+```
+
+#### Correct
+
+```python
+request = RunRequest.from_args(args)
+result = run_audit(request)
+```
