@@ -818,3 +818,79 @@ result = run_audit(RunRequest.from_args(args), args)
 request = RunRequest.from_args(args)
 result = run_audit(request)
 ```
+
+## Scenario: Runtime Configuration Seam
+
+### 1. Scope / Trigger
+
+- Trigger: CLI, Web Runner, desktop GUI, preflight, or adapters need runtime
+  configuration for third-party-backed audit capabilities.
+- This applies to configuration schema, config/env loading, validation errors,
+  and the temporary bridge that writes legacy module globals.
+
+### 2. Signatures
+
+- `veritas.runtime_config.CapabilityConfig`
+- `veritas.runtime_config.RuntimeConfig`
+- `veritas.runtime_config.default_runtime_config(defaults=None) -> RuntimeConfig`
+- `veritas.runtime_config.load_runtime_config(config_module_name="config", env=os.environ, verbose=True, defaults=None, ...) -> RuntimeConfig`
+- `veritas.legacy.apply_runtime_config(runtime_config) -> RuntimeConfig`
+
+### 3. Contracts
+
+- Configuration schema and loading logic live in `veritas/runtime_config.py`,
+  not inside `veritas/legacy.py`.
+- `paper_audit.RuntimeConfig`, `veritas.config.RuntimeConfig`, and
+  `veritas.runtime_config.RuntimeConfig` must remain the same class object.
+- `paper_audit.CapabilityConfig`, `veritas.config.CapabilityConfig`, and
+  `veritas.runtime_config.CapabilityConfig` must remain the same class object.
+- `load_runtime_config` must prefer explicit `config.py` values over
+  environment variables, then defaults.
+- The image semantic capability must accept both new
+  `IMAGE_SEMANTIC_*` names and legacy `GLM_*` names.
+- `legacy.default_runtime_config()` and `legacy.load_runtime_config()` may
+  wrap the new module so monkeypatched legacy globals and tests remain
+  compatible during migration.
+- `apply_runtime_config` remains in `legacy.py` until provider calls no longer
+  read legacy module globals.
+
+### 4. Validation & Error Matrix
+
+- Missing required Text LLM API key/url/model -> `missing_required_config`.
+- Missing required MinerU token/base URL -> `missing_required_config`.
+- Missing required image semantic API key/url/model -> `missing_required_config`.
+- Invalid `LLM_TIMEOUT` or `LLM_RETRIES` -> keep defaults and optionally print
+  the existing warning.
+- Missing config module -> use environment/defaults without failing.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `veritas.runtime_config.load_runtime_config(...)` can load from an
+  injected env dict without importing `paper_audit` or touching legacy globals.
+- Base: CLI calls `paper_audit.load_runtime_config()` and receives identical
+  behavior through the legacy compatibility wrapper.
+- Bad: A new config field is added to `config.py` handling but not represented
+  in `RuntimeConfig`, making Web/GUI status checks diverge from CLI runs.
+
+### 6. Tests Required
+
+- Unit test config-module loading maps all required capability fields.
+- Unit test environment-only loading works through `veritas.runtime_config`
+  without legacy globals.
+- Service-mode tests assert CLI/Web/GUI load runtime config before starting.
+- Package-boundary test asserts compatibility exports refer to the same config
+  class objects.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+from veritas.legacy import RuntimeConfig
+```
+
+#### Correct
+
+```python
+from veritas.runtime_config import RuntimeConfig
+```

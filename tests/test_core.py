@@ -50,6 +50,32 @@ def test_load_runtime_config_reads_explicit_config_module(monkeypatch):
     assert cfg.llm_retries == 3
 
 
+def test_runtime_config_module_loads_environment_without_legacy_globals():
+    cfg = veritas.runtime_config.load_runtime_config(
+        config_module_name="missing_config_module_for_test",
+        env={
+            "LLM_API_KEY": "env-llm-key",
+            "LLM_API_URL": "https://llm.example.test/v1/chat/completions",
+            "LLM_MODEL": "env-model",
+            "MINERU_TOKEN": "env-mineru-token",
+            "MINERU_BASE": "https://mineru.example.test",
+            "GLM_API_KEY": "env-vision-key",
+            "GLM_API_URL": "https://vision.example.test/chat",
+            "GLM_VISION_MODEL": "env-vision-model",
+            "LLM_TIMEOUT": "13",
+            "LLM_RETRIES": "4",
+        },
+        verbose=False,
+    )
+
+    assert cfg.text_llm.api_key == "env-llm-key"
+    assert cfg.mineru.api_key == "env-mineru-token"
+    assert cfg.image_semantic.api_key == "env-vision-key"
+    assert cfg.image_semantic.model == "env-vision-model"
+    assert cfg.llm_timeout == 13
+    assert cfg.llm_retries == 4
+
+
 def test_report_action_service_mode_loads_runtime_config(monkeypatch):
     fake_config = types.SimpleNamespace(
         LLM_API_KEY="llm-key",
@@ -624,7 +650,9 @@ def test_run_result_represents_complete_limited_and_failed(tmp_path):
 
 
 def test_package_boundaries_export_existing_compatibility_surface():
+    assert veritas.runtime_config.RuntimeConfig is paper_audit.RuntimeConfig
     assert veritas.config.RuntimeConfig is paper_audit.RuntimeConfig
+    assert veritas.config.CapabilityConfig is paper_audit.CapabilityConfig
     assert veritas.preflight.PreflightResult is paper_audit.PreflightResult
     assert veritas.run_types.RunRequest is paper_audit.RunRequest
     assert veritas.run_types.RunResult is paper_audit.RunResult

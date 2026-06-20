@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Tuple, Dict, List, Any, Callable
 
+from .runtime_config import (
+    CapabilityConfig,
+    RuntimeConfig,
+    default_runtime_config as _build_default_runtime_config,
+    load_runtime_config as _build_runtime_config,
+)
 from .run_types import RunRequest, RunResult
 
 # Windows/重定向控制台默认GBK时，emoji/中文符号可能触发UnicodeEncodeError；统一兜底为UTF-8。
@@ -301,117 +307,36 @@ GLM_API_KEY = ""
 GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 GLM_VISION_MODEL = "glm-4.6v-flash"
 
-@dataclass
-class CapabilityConfig:
-    """Runtime settings for one externally backed audit capability."""
-    name: str
-    api_key: str = ""
-    api_url: str = ""
-    model: str = ""
-    base_url: str = ""
-    required: bool = True
-    extra: Dict[str, Any] = field(default_factory=dict)
-
-    def missing_required_fields(self) -> List[str]:
-        missing = []
-        if self.required and not self.api_key and self.name in {"text_llm", "mineru", "image_semantic"}:
-            missing.append("api_key")
-        if self.required and not self.api_url and self.name in {"text_llm", "image_semantic"}:
-            missing.append("api_url")
-        if self.required and not self.model and self.name in {"text_llm", "image_semantic"}:
-            missing.append("model")
-        if self.required and not self.base_url and self.name == "mineru":
-            missing.append("base_url")
-        return missing
-
-
-@dataclass
-class RuntimeConfig:
-    """Explicit runtime configuration, loaded by CLI rather than at import time."""
-    text_llm: CapabilityConfig
-    mineru: CapabilityConfig
-    reference_lookup: CapabilityConfig
-    image_semantic: CapabilityConfig
-    image_detector: CapabilityConfig
-    llm_timeout: int = LLM_TIMEOUT
-    llm_retries: int = LLM_RETRIES
-
-    def validation_errors(self) -> List[Dict[str, str]]:
-        errors = []
-        for capability in (
-            self.text_llm,
-            self.mineru,
-            self.reference_lookup,
-            self.image_semantic,
-            self.image_detector,
-        ):
-            for field_name in capability.missing_required_fields():
-                errors.append({"capability": capability.name, "field": field_name, "error": "missing_required_config"})
-        return errors
+def _runtime_config_defaults() -> Dict[str, Any]:
+    return {
+        "LLM_API_KEY": LLM_API_KEY,
+        "LLM_API_URL": LLM_API_URL,
+        "LLM_MODEL": LLM_MODEL,
+        "MINERU_TOKEN": MINERU_TOKEN,
+        "MINERU_BASE": MINERU_BASE,
+        "IMAGE_SEMANTIC_API_KEY": GLM_API_KEY,
+        "IMAGE_SEMANTIC_API_URL": GLM_API_URL,
+        "IMAGE_SEMANTIC_MODEL": GLM_VISION_MODEL,
+        "LLM_TIMEOUT": LLM_TIMEOUT,
+        "LLM_RETRIES": LLM_RETRIES,
+    }
 
 
 def default_runtime_config() -> RuntimeConfig:
-    return RuntimeConfig(
-        text_llm=CapabilityConfig("text_llm", api_key=LLM_API_KEY, api_url=LLM_API_URL, model=LLM_MODEL),
-        mineru=CapabilityConfig("mineru", api_key=MINERU_TOKEN, base_url=MINERU_BASE),
-        reference_lookup=CapabilityConfig("reference_lookup", required=False),
-        image_semantic=CapabilityConfig("image_semantic", api_key=GLM_API_KEY, api_url=GLM_API_URL, model=GLM_VISION_MODEL),
-        image_detector=CapabilityConfig("image_detector", base_url="https://imagedetector.com/", required=False),
-        llm_timeout=LLM_TIMEOUT,
-        llm_retries=LLM_RETRIES,
-    )
+    return _build_default_runtime_config(defaults=_runtime_config_defaults())
 
 
 def load_runtime_config(config_module_name: str = "config", env=os.environ, verbose: bool = True) -> RuntimeConfig:
     """Load config.py and environment variables explicitly for a CLI run."""
-    cfg = None
-    try:
-        importlib.invalidate_caches()
-        cfg = importlib.import_module(config_module_name)
-        if getattr(cfg, "__spec__", None) is not None:
-            cfg = importlib.reload(cfg)
-        if verbose:
-            print(f"✅ 从 {config_module_name}.py 加载配置")
-    except ImportError:
-        if verbose:
-            print(f"⚠️ 未找到 {config_module_name}.py，将使用环境变量和默认配置")
-
-    def value(name, default=""):
-        if cfg is not None and hasattr(cfg, name):
-            return getattr(cfg, name)
-        return env.get(name, default)
-
-    llm_timeout = LLM_TIMEOUT
-    llm_retries = LLM_RETRIES
-    try:
-        llm_timeout = int(value("LLM_TIMEOUT", LLM_TIMEOUT))
-        llm_retries = int(value("LLM_RETRIES", LLM_RETRIES))
-    except (TypeError, ValueError) as e:
-        if verbose:
-            print(f"⚠️ LLM_TIMEOUT/LLM_RETRIES配置无效，已使用默认值: {e}")
-
-    return RuntimeConfig(
-        text_llm=CapabilityConfig(
-            "text_llm",
-            api_key=value("LLM_API_KEY", ""),
-            api_url=value("LLM_API_URL", LLM_API_URL),
-            model=value("LLM_MODEL", LLM_MODEL),
-        ),
-        mineru=CapabilityConfig(
-            "mineru",
-            api_key=value("MINERU_TOKEN", ""),
-            base_url=value("MINERU_BASE", MINERU_BASE),
-        ),
-        reference_lookup=CapabilityConfig("reference_lookup", required=False),
-        image_semantic=CapabilityConfig(
-            "image_semantic",
-            api_key=value("IMAGE_SEMANTIC_API_KEY", env.get("IMAGE_SEMANTIC_API_KEY", value("GLM_API_KEY", env.get("GLM_API_KEY", "")))),
-            api_url=value("IMAGE_SEMANTIC_API_URL", env.get("IMAGE_SEMANTIC_API_URL", value("GLM_API_URL", env.get("GLM_API_URL", GLM_API_URL)))),
-            model=value("IMAGE_SEMANTIC_MODEL", env.get("IMAGE_SEMANTIC_MODEL", value("GLM_VISION_MODEL", env.get("GLM_VISION_MODEL", GLM_VISION_MODEL)))),
-        ),
-        image_detector=CapabilityConfig("image_detector", base_url="https://imagedetector.com/", required=False),
-        llm_timeout=llm_timeout,
-        llm_retries=llm_retries,
+    return _build_runtime_config(
+        config_module_name=config_module_name,
+        env=env,
+        verbose=verbose,
+        defaults=_runtime_config_defaults(),
+        import_module=importlib.import_module,
+        reload_module=importlib.reload,
+        invalidate_caches=importlib.invalidate_caches,
+        printer=print,
     )
 
 
