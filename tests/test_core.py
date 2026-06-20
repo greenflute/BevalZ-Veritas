@@ -664,6 +664,10 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.risk_rules.apply_risk_rules is paper_audit.apply_risk_rules
     assert veritas.adapter_types.AdapterResult is paper_audit.AdapterResult
     assert veritas.adapters.AdapterResult is paper_audit.AdapterResult
+    assert veritas.adapter_types.AuditAdapters is paper_audit.AuditAdapters
+    assert veritas.adapters.AuditAdapters is paper_audit.AuditAdapters
+    assert veritas.adapter_types.TextLLMAdapter is paper_audit.TextLLMAdapter
+    assert veritas.adapters.TextLLMAdapter is paper_audit.TextLLMAdapter
 
 
 def test_paper_audit_import_still_allows_legacy_monkeypatches(monkeypatch):

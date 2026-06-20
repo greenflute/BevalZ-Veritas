@@ -39,4 +39,52 @@ class AdapterResult:
         }
 
 
-__all__ = ["AdapterResult"]
+class MinerUAdapter:
+    def preflight(self) -> AdapterResult:
+        raise NotImplementedError
+
+    def extract(self, file_path, language="ch", output_dir=None) -> AdapterResult:
+        raise NotImplementedError
+
+
+class TextLLMAdapter:
+    def preflight(self) -> AdapterResult:
+        raise NotImplementedError
+
+    def review(self, text: str, chunk_info=None) -> AdapterResult:
+        raise NotImplementedError
+
+
+class ReferenceLookupAdapter:
+    def audit(self, references_text: str, online=False, online_limit=50, timeout=10, cache=None) -> AdapterResult:
+        raise NotImplementedError
+
+
+class ImageSemanticAdapter:
+    def analyze(self, image_path: str, timeout=45) -> AdapterResult:
+        raise NotImplementedError
+
+
+class ImageDetectorAdapter:
+    def detect(self, image_path: str, timeout=60) -> AdapterResult:
+        raise NotImplementedError
+
+
+@dataclass
+class AuditAdapters:
+    mineru: MinerUAdapter
+    text_llm: TextLLMAdapter
+    reference_lookup: ReferenceLookupAdapter
+    image_semantic: ImageSemanticAdapter
+    image_detector: ImageDetectorAdapter
+
+
+__all__ = [
+    "AdapterResult",
+    "MinerUAdapter",
+    "TextLLMAdapter",
+    "ReferenceLookupAdapter",
+    "ImageSemanticAdapter",
+    "ImageDetectorAdapter",
+    "AuditAdapters",
+]

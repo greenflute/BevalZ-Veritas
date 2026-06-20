@@ -12,7 +12,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Tuple, Dict, List, Any, Callable
 
-from .adapter_types import AdapterResult
+from .adapter_types import (
+    AdapterResult,
+    AuditAdapters,
+    ImageDetectorAdapter,
+    ImageSemanticAdapter,
+    MinerUAdapter,
+    ReferenceLookupAdapter,
+    TextLLMAdapter,
+)
 from .runtime_config import (
     CapabilityConfig,
     RuntimeConfig,
@@ -855,37 +863,6 @@ def default_retry_command(input_path: Path) -> str:
     return f"python paper_audit.py {_shell_quote(str(input_path))} --json"
 
 
-class MinerUAdapter:
-    def preflight(self) -> AdapterResult:
-        raise NotImplementedError
-
-    def extract(self, file_path: Path, language="ch", output_dir=None) -> AdapterResult:
-        raise NotImplementedError
-
-
-class TextLLMAdapter:
-    def preflight(self) -> AdapterResult:
-        raise NotImplementedError
-
-    def review(self, text: str, chunk_info=None) -> AdapterResult:
-        raise NotImplementedError
-
-
-class ReferenceLookupAdapter:
-    def audit(self, references_text: str, online=False, online_limit=50, timeout=10, cache=None) -> AdapterResult:
-        raise NotImplementedError
-
-
-class ImageSemanticAdapter:
-    def analyze(self, image_path: str, timeout=45) -> AdapterResult:
-        raise NotImplementedError
-
-
-class ImageDetectorAdapter:
-    def detect(self, image_path: str, timeout=60) -> AdapterResult:
-        raise NotImplementedError
-
-
 def _adapter_result_from_preflight(result: PreflightResult) -> AdapterResult:
     if result.ok:
         return AdapterResult.success(result.to_dict(), details=result.details)
@@ -956,15 +933,6 @@ class ProductionImageDetectorAdapter(ImageDetectorAdapter):
         if isinstance(result, dict) and result.get("status") == "error":
             return AdapterResult.failure(result.get("reason") or "provider_error", result.get("summary") or "image detector failed", result)
         return AdapterResult.success(result)
-
-
-@dataclass
-class AuditAdapters:
-    mineru: MinerUAdapter
-    text_llm: TextLLMAdapter
-    reference_lookup: ReferenceLookupAdapter
-    image_semantic: ImageSemanticAdapter
-    image_detector: ImageDetectorAdapter
 
 
 def default_audit_adapters() -> AuditAdapters:

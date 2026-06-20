@@ -907,6 +907,12 @@ from veritas.runtime_config import RuntimeConfig
 ### 2. Signatures
 
 - `veritas.adapter_types.AdapterResult`
+- `veritas.adapter_types.MinerUAdapter`
+- `veritas.adapter_types.TextLLMAdapter`
+- `veritas.adapter_types.ReferenceLookupAdapter`
+- `veritas.adapter_types.ImageSemanticAdapter`
+- `veritas.adapter_types.ImageDetectorAdapter`
+- `veritas.adapter_types.AuditAdapters`
 - `AdapterResult.success(value=None, details=None) -> AdapterResult`
 - `AdapterResult.failure(error_class, message, details=None) -> AdapterResult`
 - `AdapterResult.skipped(reason, message, details=None) -> AdapterResult`
@@ -914,17 +920,19 @@ from veritas.runtime_config import RuntimeConfig
 
 ### 3. Contracts
 
-- `AdapterResult` lives in `veritas/adapter_types.py`, not inside
-  `veritas/legacy.py`.
+- `AdapterResult`, adapter interface classes, and `AuditAdapters` live in
+  `veritas/adapter_types.py`, not inside `veritas/legacy.py`.
 - `paper_audit.AdapterResult`, `veritas.adapters.AdapterResult`, and
   `veritas.adapter_types.AdapterResult` must remain the same class object.
+- `paper_audit.AuditAdapters`, `veritas.adapters.AuditAdapters`, and
+  `veritas.adapter_types.AuditAdapters` must remain the same class object.
 - `status == "success"` is the only truthy `ok` state.
 - Failure and skipped results must carry `error_class`, `message`, and
   structured `details` without requiring callers to inspect provider-specific
   payloads.
-- Production and fake adapter classes may remain in the legacy compatibility
-  layer while they depend on legacy provider functions, but they must return
-  the stable `AdapterResult` type.
+- Production and fake adapter implementation classes may remain in the legacy
+  compatibility layer while they depend on legacy provider functions, but they
+  must implement the stable adapter interfaces and return `AdapterResult`.
 
 ### 4. Validation & Error Matrix
 
@@ -949,7 +957,7 @@ from veritas.runtime_config import RuntimeConfig
   unsupported-content modes.
 - Unit test production adapters wrap injected functions into `AdapterResult`.
 - Package-boundary test asserts compatibility exports refer to the same
-  `AdapterResult` class object.
+  `AdapterResult`, adapter interface, and `AuditAdapters` class objects.
 
 ### 7. Wrong vs Correct
 
