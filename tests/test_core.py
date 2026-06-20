@@ -10,7 +10,7 @@ import zipfile
 
 import paper_audit
 import veritas
-from veritas.models import AuditReportModel, EvidenceFinding
+from veritas.models import AuditReportModel, EvidenceFinding, audit_report_from_dict, model_to_dict
 from veritas.renderers import render_html_report, render_markdown_report
 
 
@@ -692,6 +692,30 @@ def test_renderer_boundary_accepts_stable_report_model(tmp_path):
     assert "Schema版本" in html
     assert "Adapter版本" in html
     assert "证据风险分" in html
+
+
+def test_model_boundary_normalizes_report_dicts():
+    report = audit_report_from_dict({
+        "summary": "needs review",
+        "risk_level": "中",
+        "detection_score": "42",
+        "checks": [{
+            "category": "图像",
+            "item": "Figure 1",
+            "verdict": "⚠️疑点",
+            "source": "Figure 1 legend",
+            "evidence": "Possible duplicated panel.",
+            "confidence": "0.73",
+        }],
+    })
+    payload = model_to_dict(report)
+
+    assert isinstance(report, AuditReportModel)
+    assert report.detection_score == 42
+    assert report.checks[0].source_text == "Figure 1 legend"
+    assert report.checks[0].confidence == 0.73
+    assert report.checks[0].reason == ""
+    assert payload["checks"][0]["item"] == "Figure 1"
 
 
 def test_evaluation_replay_suite_runs_synthetic_fixture_without_network():
