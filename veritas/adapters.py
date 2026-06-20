@@ -1,6 +1,6 @@
 """External audit capability adapter boundary."""
 
-from .legacy import (
+from .production_adapters import (
     ProductionImageDetectorAdapter,
     ProductionImageSemanticAdapter,
     ProductionMinerUAdapter,

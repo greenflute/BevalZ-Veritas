@@ -933,9 +933,11 @@ from veritas.runtime_config import RuntimeConfig
 - Fake adapter implementation classes live in `veritas/fake_adapters.py` and
   remain re-exported through `paper_audit` and `veritas.adapters` for
   compatibility.
-- Production adapter implementation classes may remain in the legacy
-  compatibility layer while they depend on legacy provider functions, but they
-  must implement the stable adapter interfaces and return `AdapterResult`.
+- Production adapter implementation classes live in
+  `veritas/production_adapters.py` and lazily resolve legacy provider
+  functions when no injected callable is supplied.
+- Production and fake adapters must implement the stable adapter interfaces and
+  return `AdapterResult`.
 
 ### 4. Validation & Error Matrix
 

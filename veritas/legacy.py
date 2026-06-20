@@ -37,6 +37,14 @@ from .runtime_config import (
     load_runtime_config as _build_runtime_config,
 )
 from .preflight_types import PreflightResult, run_preflight_once
+from .production_adapters import (
+    ProductionImageDetectorAdapter,
+    ProductionImageSemanticAdapter,
+    ProductionMinerUAdapter,
+    ProductionReferenceLookupAdapter,
+    ProductionTextLLMAdapter,
+    default_audit_adapters,
+)
 from .run_types import RunRequest, RunResult
 
 # Windows/重定向控制台默认GBK时，emoji/中文符号可能触发UnicodeEncodeError；统一兜底为UTF-8。
@@ -870,88 +878,6 @@ def retry_command_from_args(args, input_path: Path) -> str:
 
 def default_retry_command(input_path: Path) -> str:
     return f"python paper_audit.py {_shell_quote(str(input_path))} --json"
-
-
-def _adapter_result_from_preflight(result: PreflightResult) -> AdapterResult:
-    if result.ok:
-        return AdapterResult.success(result.to_dict(), details=result.details)
-    return AdapterResult.failure(result.error_class or "preflight_failed", result.message or "preflight failed", result.details)
-
-
-class ProductionMinerUAdapter(MinerUAdapter):
-    def __init__(self, preflight_func: Callable = None, extract_func: Callable = None):
-        self.preflight_func = preflight_func or preflight_mineru
-        self.extract_func = extract_func or mineru_extract
-
-    def preflight(self) -> AdapterResult:
-        return _adapter_result_from_preflight(self.preflight_func())
-
-    def extract(self, file_path: Path, language="ch", output_dir=None) -> AdapterResult:
-        text, meta = self.extract_func(file_path, language=language, output_dir=output_dir)
-        if text:
-            return AdapterResult.success({"text": text, "meta": meta or {}})
-        meta = meta if isinstance(meta, dict) else {}
-        return AdapterResult.failure(meta.get("error_class", "provider_error"), meta.get("error", "MinerU extraction failed"), meta)
-
-
-class ProductionTextLLMAdapter(TextLLMAdapter):
-    def __init__(self, preflight_func: Callable = None, review_func: Callable = None):
-        self.preflight_func = preflight_func or preflight_text_llm
-        self.review_func = review_func or call_llm
-
-    def preflight(self) -> AdapterResult:
-        return _adapter_result_from_preflight(self.preflight_func())
-
-    def review(self, text: str, chunk_info=None) -> AdapterResult:
-        try:
-            return AdapterResult.success(self.review_func(text, chunk_info=chunk_info))
-        except Exception as e:
-            return AdapterResult.failure("provider_error", str(e), {"chunk_info": chunk_info})
-
-
-class ProductionReferenceLookupAdapter(ReferenceLookupAdapter):
-    def __init__(self, audit_func: Callable = None):
-        self.audit_func = audit_func or audit_references
-
-    def audit(self, references_text: str, online=False, online_limit=50, timeout=10, cache=None) -> AdapterResult:
-        try:
-            return AdapterResult.success(self.audit_func(references_text, online=online, online_limit=online_limit, timeout=timeout, cache=cache))
-        except Exception as e:
-            return AdapterResult.failure("provider_error", str(e), {"online": online})
-
-
-class ProductionImageSemanticAdapter(ImageSemanticAdapter):
-    def __init__(self, analyze_func: Callable = None):
-        self.analyze_func = analyze_func or call_glm_image_semantics
-
-    def analyze(self, image_path: str, timeout=45) -> AdapterResult:
-        result = self.analyze_func(image_path, timeout=timeout)
-        if isinstance(result, dict) and result.get("status") == "error":
-            return AdapterResult.failure(result.get("reason") or "provider_error", result.get("error_message") or "image semantic analysis failed", result)
-        return AdapterResult.success(result)
-
-
-class ProductionImageDetectorAdapter(ImageDetectorAdapter):
-    def __init__(self, detect_func: Callable = None):
-        self.detect_func = detect_func or call_imagedetector
-
-    def detect(self, image_path: str, timeout=60) -> AdapterResult:
-        result = self.detect_func(image_path, timeout=timeout)
-        if isinstance(result, dict) and result.get("status") == "skipped":
-            return AdapterResult.skipped(result.get("reason") or "skipped", result.get("summary") or "image detector skipped", result)
-        if isinstance(result, dict) and result.get("status") == "error":
-            return AdapterResult.failure(result.get("reason") or "provider_error", result.get("summary") or "image detector failed", result)
-        return AdapterResult.success(result)
-
-
-def default_audit_adapters() -> AuditAdapters:
-    return AuditAdapters(
-        mineru=ProductionMinerUAdapter(),
-        text_llm=ProductionTextLLMAdapter(),
-        reference_lookup=ProductionReferenceLookupAdapter(),
-        image_semantic=ProductionImageSemanticAdapter(),
-        image_detector=ProductionImageDetectorAdapter(),
-    )
 
 
 def adapter_failure_to_audit_failure(
