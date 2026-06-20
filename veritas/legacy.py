@@ -46,11 +46,17 @@ from .followups import (
     _normalize_custom_concerns,
     _normalize_followup_issues,
     _split_author_text,
+    _followup_draft_filename,
+    _followup_output_dir,
     build_followup_generation_context,
     build_followup_prompt,
+    generate_and_save_followup_draft_from_namespace,
+    generate_followup_draft_from_namespace,
+    load_existing_followups,
     normalize_article_identity,
     normalize_followup_language,
     normalize_followup_tone,
+    save_followup_artifacts_from_namespace,
 )
 from .html_utils import _html_escape, _json_for_script_tag
 from .config import (
@@ -1745,84 +1751,8 @@ def call_llm_messages(messages, temperature=0.2, timeout=None, max_tokens=1800):
     return result["choices"][0]["message"]["content"]
 
 
-def _followup_output_dir(context):
-    context = context if isinstance(context, dict) else {}
-    raw = context.get("followups_dir")
-    if not raw:
-        artifact_paths = context.get("artifact_paths") if isinstance(context.get("artifact_paths"), dict) else {}
-        raw = artifact_paths.get("html") or artifact_paths.get("markdown") or context.get("paper") or "."
-        raw = str(Path(raw).parent / "followups")
-    path = Path(str(raw)).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _followup_draft_filename(kind, language):
-    language = normalize_followup_language(language)
-    if kind == "pubpeer_comment":
-        return f"pubpeer_comment.{language}.md"
-    if kind == "journal_letter":
-        return f"journal_letter.{language}.md"
-    raise ValueError(f"unsupported action kind: {kind}")
-
-
-def load_existing_followups(context, language="zh"):
-    language = normalize_followup_language(language)
-    output_dir = _followup_output_dir(context)
-    drafts = {}
-    for kind in ("pubpeer_comment", "journal_letter"):
-        path = output_dir / _followup_draft_filename(kind, language)
-        if path.exists():
-            drafts[kind] = {"path": str(path), "text": path.read_text(encoding="utf-8")}
-    identity_path = output_dir / "article_identity.json"
-    identity = _json_load(identity_path, {}) if identity_path.exists() else {}
-    return {
-        "ok": True,
-        "language": language,
-        "followups_dir": str(output_dir),
-        "identity": identity if isinstance(identity, dict) else {},
-        "drafts": drafts,
-    }
-
-
 def save_followup_artifacts(kind, context, language, text):
-    language = normalize_followup_language(language)
-    output_dir = _followup_output_dir(context)
-    identity_path = output_dir / "article_identity.json"
-    draft_path = output_dir / _followup_draft_filename(kind, language)
-    log_path = output_dir / "followup_generation_log.json"
-    identity_payload = {
-        **(context.get("paper_identity") if isinstance(context.get("paper_identity"), dict) else {}),
-        "source": "html_confirmed",
-        "confirmed_at": context.get("confirmed_at") or datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "language": language,
-    }
-    _json_save(identity_path, identity_payload)
-    draft_path.write_text(str(text or ""), encoding="utf-8")
-    existing_log = _json_load(log_path, [])
-    if not isinstance(existing_log, list):
-        existing_log = []
-    existing_log.append({
-        "created_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "kind": kind,
-        "language": language,
-        "tone": context.get("tone"),
-        "model": LLM_MODEL,
-        "draft_path": str(draft_path),
-        "identity_path": str(identity_path),
-        "selected_issue_count": len(context.get("selected_issues") or []),
-        "custom_concern_count": len(context.get("custom_concerns") or []),
-        "artifact_type": context.get("artifact_type"),
-    })
-    _json_save(log_path, existing_log)
-    return {
-        "followups_dir": str(output_dir),
-        "identity_path": str(identity_path),
-        "draft_path": str(draft_path),
-        "log_path": str(log_path),
-    }
+    return save_followup_artifacts_from_namespace(globals(), kind, context, language, text)
 
 
 def generate_and_save_followup_draft(
@@ -1836,33 +1766,22 @@ def generate_and_save_followup_draft(
     disclaimer_confirmed=False,
     timeout=None,
 ):
-    if not disclaimer_confirmed:
-        raise ValueError("manual_review_confirmation_required")
-    language = normalize_followup_language(language)
-    prepared_context = build_followup_generation_context(
+    return generate_and_save_followup_draft_from_namespace(
+        globals(),
+        kind,
         context,
+        language=language,
         identity=identity,
         selected_issues=selected_issues,
         custom_concerns=custom_concerns,
         tone=tone,
+        disclaimer_confirmed=disclaimer_confirmed,
+        timeout=timeout,
     )
-    text = generate_followup_draft(kind, prepared_context, language=language, tone=prepared_context.get("tone"), timeout=timeout)
-    paths = save_followup_artifacts(kind, prepared_context, language, text)
-    return {
-        "ok": True,
-        "kind": kind,
-        "language": language,
-        "tone": prepared_context.get("tone"),
-        "model": LLM_MODEL,
-        "text": text,
-        "paths": paths,
-        "context": prepared_context,
-    }
 
 
 def generate_followup_draft(kind, context, language="zh", tone=None, timeout=None):
-    messages = build_followup_prompt(kind, context, language=language, tone=tone)
-    return call_llm_messages(messages, temperature=0.15, timeout=timeout, max_tokens=2200)
+    return generate_followup_draft_from_namespace(globals(), kind, context, language=language, tone=tone, timeout=timeout)
 
 
 def report_action_service_url(host="127.0.0.1", port=8765):

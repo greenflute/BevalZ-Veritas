@@ -786,6 +786,10 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.followups.normalize_article_identity is paper_audit.normalize_article_identity
     assert veritas.followups.build_followup_generation_context is paper_audit.build_followup_generation_context
     assert veritas.followups.build_followup_prompt is paper_audit.build_followup_prompt
+    assert veritas.followups.load_existing_followups is paper_audit.load_existing_followups
+    assert callable(veritas.followups.save_followup_artifacts_from_namespace)
+    assert callable(veritas.followups.generate_followup_draft_from_namespace)
+    assert callable(veritas.followups.generate_and_save_followup_draft_from_namespace)
     assert veritas.versions.PROMPT_VERSION == paper_audit.PROMPT_VERSION
     assert veritas.versions.SCHEMA_VERSION == paper_audit.SCHEMA_VERSION
     assert veritas.versions.ADAPTER_VERSION == paper_audit.ADAPTER_VERSION
@@ -5392,6 +5396,49 @@ def test_generate_and_save_followup_draft_persists_formal_artifacts(monkeypatch,
     assert log_payload[-1]["tone"] == "standard"
     assert captured["context"]["custom_concerns"][0]["source"] == "user_added"
     assert captured["context"]["selected_issues"][0]["id"] == "issue-1"
+
+
+def test_followup_boundary_generates_and_saves_from_namespace(tmp_path):
+    captured = {}
+
+    def fake_generate(kind, context, language="zh", tone=None, timeout=None):
+        captured["kind"] = kind
+        captured["context"] = context
+        captured["language"] = language
+        captured["tone"] = tone
+        captured["timeout"] = timeout
+        return "Existing concern draft"
+
+    result = veritas.followups.generate_and_save_followup_draft_from_namespace(
+        {"generate_followup_draft": fake_generate, "LLM_MODEL": "namespace-model"},
+        "journal_letter",
+        {
+            "artifact_type": "limited",
+            "followups_dir": str(tmp_path / "followups"),
+            "paper_identity": {"title": "Original", "journal": "Journal", "authors": ["Alice"]},
+            "top_issues": [{"id": "issue-1", "category": "数据", "item": "异常", "reason": "异常"}],
+        },
+        language="en",
+        identity={"title": "Confirmed", "journal": "Confirmed Journal", "authors": "Alice, Bob"},
+        selected_issues=[{"id": "issue-1", "category": "数据", "item": "异常", "reason": "异常"}],
+        custom_concerns="manual concern",
+        tone="firm",
+        disclaimer_confirmed=True,
+        timeout=7,
+    )
+
+    followups_dir = tmp_path / "followups"
+    log_payload = json.loads((followups_dir / "followup_generation_log.json").read_text(encoding="utf-8"))
+
+    assert result["model"] == "namespace-model"
+    assert result["paths"]["draft_path"].endswith("journal_letter.en.md")
+    assert (followups_dir / "journal_letter.en.md").read_text(encoding="utf-8") == "Existing concern draft"
+    assert log_payload[-1]["model"] == "namespace-model"
+    assert captured["language"] == "en"
+    assert captured["tone"] == "firm"
+    assert captured["timeout"] == 7
+    assert captured["context"]["paper_identity"]["title"] == "Confirmed"
+    assert captured["context"]["custom_concerns"][0]["source"] == "user_added"
 
 
 def test_generate_and_save_followup_requires_manual_confirmation(tmp_path):

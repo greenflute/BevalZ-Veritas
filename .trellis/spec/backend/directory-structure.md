@@ -24,7 +24,7 @@ veritas/
 ├── cli.py              # CLI entry point boundary
 ├── config.py           # Runtime configuration boundary
 ├── failed_diagnostics.py # Stable failed-audit payload and conversion helpers
-├── followups.py       # PubPeer/comment and journal-letter context/prompt helpers
+├── followups.py       # PubPeer/comment and journal-letter draft workflow helpers
 ├── html_utils.py       # HTML escaping and script-safe JSON helpers
 ├── models.py           # Stable dataclass/report models and model conversion
 ├── preflight.py        # Critical capability preflight boundary
@@ -104,10 +104,12 @@ tests/
   compatibility while renderer extraction continues.
 - `veritas/text_utils.py` owns shared text shortening and token similarity
   helpers used by follow-up generation, risk rules, references, and renderers.
-- `veritas/followups.py` owns pure PubPeer/comment and journal-letter language,
-  tone, article-identity, issue-normalization, context-building, and prompt
-  construction helpers. Legacy may keep LLM invocation and artifact persistence
-  wrappers until those dependencies are untangled.
+- `veritas/followups.py` owns PubPeer/comment and journal-letter language,
+  tone, article-identity, issue-normalization, context-building, prompt
+  construction, draft artifact load/save, and namespace-aware generation
+  helpers. `veritas.legacy` may wrap namespace-aware functions with its own
+  globals so historical `paper_audit.generate_followup_draft` monkeypatch
+  behavior remains compatible.
 - `veritas/versions.py` owns prompt, schema, adapter, and risk-rule version
   constants; compatibility modules should import these constants rather than
   redefining them.

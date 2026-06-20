@@ -138,6 +138,7 @@ semantic_result = semantic_cache.get(cache_key)
 - `build_followup_generation_context(context, identity=None, selected_issues=None, custom_concerns=None, tone="conservative") -> dict`
 - `build_followup_prompt(kind, context, language="zh", tone=None) -> list[dict]`
 - `generate_and_save_followup_draft(kind, context, language="zh", identity=None, selected_issues=None, custom_concerns=None, tone="conservative", disclaimer_confirmed=False, timeout=None) -> dict`
+- `generate_and_save_followup_draft_from_namespace(namespace, kind, context, language="zh", identity=None, selected_issues=None, custom_concerns=None, tone="conservative", disclaimer_confirmed=False, timeout=None) -> dict`
 - `load_existing_followups(context, language="zh") -> dict`
 - Report action service routes:
   - `POST /generate`
@@ -161,6 +162,10 @@ semantic_result = semantic_cache.get(cache_key)
   concerns, language, tone, artifact type, and limited reasons when present.
 - Existing drafts must be loadable through `POST /followups` when reopening an
   old HTML report while the local service is running.
+- Namespace-aware follow-up helpers live in `veritas/followups.py`; legacy
+  wrappers must pass `globals()` so existing monkeypatches of
+  `paper_audit.generate_followup_draft` and `paper_audit.LLM_MODEL` keep
+  affecting formal saved drafts.
 
 ### 4. Validation & Error Matrix
 
