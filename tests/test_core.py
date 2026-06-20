@@ -781,6 +781,11 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.text_utils._normalize_title is paper_audit._normalize_title
     assert veritas.text_utils._title_tokens is paper_audit._title_tokens
     assert veritas.text_utils._token_similarity is paper_audit._token_similarity
+    assert veritas.followups.normalize_followup_language is paper_audit.normalize_followup_language
+    assert veritas.followups.normalize_followup_tone is paper_audit.normalize_followup_tone
+    assert veritas.followups.normalize_article_identity is paper_audit.normalize_article_identity
+    assert veritas.followups.build_followup_generation_context is paper_audit.build_followup_generation_context
+    assert veritas.followups.build_followup_prompt is paper_audit.build_followup_prompt
     assert veritas.versions.PROMPT_VERSION == paper_audit.PROMPT_VERSION
     assert veritas.versions.SCHEMA_VERSION == paper_audit.SCHEMA_VERSION
     assert veritas.versions.ADAPTER_VERSION == paper_audit.ADAPTER_VERSION
