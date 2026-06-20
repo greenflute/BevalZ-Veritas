@@ -674,6 +674,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.workspace.record_run_workspace_artifacts is paper_audit.record_run_workspace_artifacts
     assert veritas.report_schema.parse_report is paper_audit.parse_report
     assert veritas.report_schema.normalize_llm_report_schema is paper_audit.normalize_llm_report_schema
+    assert veritas.retry_commands.retry_command_from_args is paper_audit.retry_command_from_args
+    assert veritas.retry_commands.default_retry_command is paper_audit.default_retry_command
     assert veritas.risk_rules.apply_risk_rules is paper_audit.apply_risk_rules
     assert veritas.adapter_types.AdapterResult is paper_audit.AdapterResult
     assert veritas.adapters.AdapterResult is paper_audit.AdapterResult

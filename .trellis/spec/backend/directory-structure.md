@@ -30,6 +30,7 @@ veritas/
 └── workspace.py        # Per-run workspace boundary
 └── file_utils.py       # Shared safe-name and JSON file helpers
 └── report_schema.py    # Strict LLM evidence schema parser
+└── retry_commands.py   # Retry command builders for failed diagnostics
 tests/
 └── test_core.py        # Core unit and smoke coverage
 ```
@@ -71,6 +72,9 @@ tests/
 - `veritas/report_schema.py` owns strict LLM evidence schema parsing and
   normalization; `paper_audit` keeps compatibility by re-exporting the same
   parser function objects through `veritas.legacy`.
+- `veritas/retry_commands.py` owns retry command builders used by failed
+  diagnostics; `paper_audit` keeps compatibility by re-exporting the same
+  function objects through `veritas.legacy`.
 - `veritas/renderers.py` accepts `AuditReportModel` / `EvidenceFinding` and
   converts them before delegating to the existing Markdown and HTML renderers.
 - `veritas/run.py` exposes the run orchestration boundary without requiring

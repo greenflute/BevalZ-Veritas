@@ -81,6 +81,8 @@ Questions to answer:
   - `failure.fix_hints`
   - `failure.completed_stages`
   - `failure.retry_command`
+- Retry command builders live in `veritas/retry_commands.py` and remain
+  re-exported through `paper_audit` for compatibility.
 - Preflight success can be reused only through the in-memory `preflight_state` for the current process run. Do not persist preflight success into resume caches.
 - `paper_audit.PreflightResult`, `veritas.preflight.PreflightResult`, and
   `veritas.preflight_types.PreflightResult` must remain the same class object.

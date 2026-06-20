@@ -7,7 +7,7 @@
 输入论文文件或目录 → 文本提取 → 本地统计检测 + LLM语义分析 → 输出md/html格式报告
 用法: python paper_audit.py <paper_path> [--mineru] [--max-chars 8000] [--output report.md]
 """
-import re, json, time, argparse, urllib.request, urllib.parse, zlib, math, collections, os, mimetypes, fnmatch, csv, platform, webbrowser, subprocess, sys, requests, builtins, hashlib, html, base64, io, concurrent.futures, signal, threading, shlex, datetime
+import re, json, time, argparse, urllib.request, urllib.parse, zlib, math, collections, os, mimetypes, fnmatch, csv, platform, webbrowser, subprocess, sys, requests, builtins, hashlib, html, base64, io, concurrent.futures, signal, threading, datetime
 from pathlib import Path
 from typing import Tuple, Dict, List, Any, Callable
 
@@ -56,6 +56,7 @@ from .production_adapters import (
 )
 from .run_types import RunRequest, RunResult
 from .report_schema import LLM_REQUIRED_FINDING_FIELDS, _json_string_unescape, normalize_llm_report_schema, parse_report
+from .retry_commands import _shell_quote, default_retry_command, retry_command_from_args
 from .web_runner_paths import (
     _web_runner_common_search_roots,
     _web_runner_is_basename_only_input,
@@ -730,59 +731,6 @@ def preflight_failure_to_audit_failure(
         details=result.to_dict(),
         created_at=result.created_at,
     )
-
-
-def _shell_quote(value: Any) -> str:
-    return shlex.quote(str(value))
-
-
-def _append_flag(parts: List[str], enabled: bool, flag: str):
-    if enabled:
-        parts.append(flag)
-
-
-def retry_command_from_args(args, input_path: Path) -> str:
-    """Build a retry command that keeps the current audit scope and reuses resume caches."""
-    parts = ["python", "paper_audit.py", str(input_path)]
-
-    option_pairs = [
-        ("output", "--output"),
-        ("mineru_model", "--mineru-model"),
-        ("mineru_lang", "--mineru-lang"),
-        ("max_chars", "--max-chars"),
-        ("reference_online_limit", "--reference-online-limit"),
-        ("reference_timeout", "--reference-timeout"),
-        ("resource_timeout", "--resource-timeout"),
-        ("image_audit_limit", "--image-audit-limit"),
-        ("image_semantic_limit", "--image-semantic-limit"),
-        ("image_semantic_timeout", "--image-semantic-timeout"),
-        ("image_detector_limit", "--image-detector-limit"),
-        ("image_detector_timeout", "--image-detector-timeout"),
-        ("llm_timeout", "--llm-timeout"),
-        ("llm_retries", "--llm-retries"),
-    ]
-    for attr, flag in option_pairs:
-        value = getattr(args, attr, None)
-        if value is not None and value != "":
-            parts.extend([flag, str(value)])
-
-    _append_flag(parts, bool(getattr(args, "json", False)), "--json")
-    _append_flag(parts, bool(getattr(args, "no_open", False)), "--no-open")
-    _append_flag(parts, bool(getattr(args, "mineru", False)), "--mineru")
-    _append_flag(parts, bool(getattr(args, "no_mineru", False)), "--no-mineru")
-    _append_flag(parts, bool(getattr(args, "no_reference_online", False)), "--no-reference-online")
-    _append_flag(parts, bool(getattr(args, "no_resource_online", False)), "--no-resource-online")
-    _append_flag(parts, bool(getattr(args, "no_image_semantic", False)), "--no-image-semantic")
-    _append_flag(parts, bool(getattr(args, "no_image_detector", False)), "--no-image-detector")
-    _append_flag(parts, bool(getattr(args, "strict_failed_chunks", False)), "--strict-failed-chunks")
-    _append_flag(parts, bool(getattr(args, "ai_detect", False)), "--ai-detect")
-    _append_flag(parts, bool(getattr(args, "image_detect", False)), "--image-detect")
-
-    return " ".join(_shell_quote(part) for part in parts)
-
-
-def default_retry_command(input_path: Path) -> str:
-    return f"python paper_audit.py {_shell_quote(str(input_path))} --json"
 
 
 def adapter_failure_to_audit_failure(
