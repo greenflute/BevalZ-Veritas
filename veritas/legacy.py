@@ -105,6 +105,13 @@ from .models import (
 )
 from .preflight import _chat_completions_endpoint, preflight_mineru_from_namespace, preflight_text_llm_from_namespace
 from .preflight_types import PreflightResult, run_preflight_once
+from .project_files import (
+    SUPPORTED_TEXT_FILE_EXTENSIONS,
+    _is_missing_meta_value,
+    _main_paper_score,
+    find_project_files,
+    normalize_run_meta,
+)
 from .production_adapters import (
     ProductionImageDetectorAdapter,
     ProductionImageSemanticAdapter,
@@ -314,8 +321,6 @@ try:
     EXCEL_SUPPORTED = True
 except ImportError:
     EXCEL_SUPPORTED = False
-
-SUPPORTED_TEXT_FILE_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xlsm", ".csv", ".txt", ".md"}
 
 # ══════════════════════════════════════════════════════════════
 # 配置区
@@ -1167,150 +1172,6 @@ def mineru_extract(file_path, language="ch", output_dir=None):
     else:
         # 当作URL处理
         return mineru_precision_extract_by_url(str(file_path), language=language, output_dir=output_dir)
-
-
-# ══════════════════════════════════════════════════════════════
-# 目录级综合分析模块
-# ══════════════════════════════════════════════════════════════
-
-def find_project_files(root_path: Path) -> Tuple[Dict, List[Path]]:
-    """递归扫描目录，识别论文项目相关的所有文件
-    返回：(文件分类字典, 所有有效文件列表)
-    """
-    SUPPLEMENT_KEYWORDS = {"supplement", "supp", "补充材料", "原始数据", "data", "source", "appendix"}
-    REFERENCE_KEYWORDS = {"reference", "references", "bibliography", "参考文献", "参考资料"}
-    GENERATED_MARKERS = (
-        ".audit.",
-        ".limited.",
-        ".failed.",
-        "audit_report.",
-        "reference_audit_full.",
-        ".paper_audit.",
-        ".mineru.",
-        ".mineru_",
-    )
-    
-    file_categories = {
-        "main_paper": None,
-        "supplements": [],
-        "data_files": [],
-        "references": [],
-        "other": []
-    }
-    all_files = []
-    
-    for root, dirs, files in os.walk(root_path):
-        dirs[:] = [d for d in dirs if ".paper_audit_resume" not in d and "__pycache__" not in d]
-        dirs.sort()
-        for file in sorted(files):
-            fpath = Path(root) / file
-            ext = fpath.suffix.lower()
-            if ext not in SUPPORTED_TEXT_FILE_EXTENSIONS:
-                continue
-            lower_name = fpath.name.lower()
-            if any(marker in lower_name for marker in GENERATED_MARKERS):
-                continue
-            
-            fname = lower_name
-            all_files.append(fpath)
-            
-            # 分类。PDF文件名里的reference常见于文章下载名/DOI附件名，不能仅凭文件名
-            # 把PDF排除出主体审查；参考文献PDF若不是主文，会在主文选择后再移入other/refs。
-            if ext != ".pdf" and any(kw in fname for kw in REFERENCE_KEYWORDS):
-                file_categories["references"].append(fpath)
-            elif ext == ".pdf" and (file_categories["main_paper"] is None or 
-                                 _main_paper_score(fpath) > _main_paper_score(file_categories["main_paper"])):
-                file_categories["main_paper"] = fpath
-            elif any(kw in fname for kw in SUPPLEMENT_KEYWORDS):
-                file_categories["supplements"].append(fpath)
-            elif ext in {".xlsx", ".xlsm", ".csv"}:
-                file_categories["data_files"].append(fpath)
-            else:
-                file_categories["other"].append(fpath)
-    
-    # 未找到明确主论文则取评分最高的PDF
-    pdf_files = [f for f in all_files if f.suffix.lower() == ".pdf"]
-    if file_categories["main_paper"] is None and pdf_files:
-        file_categories["main_paper"] = max(pdf_files, key=_main_paper_score)
-
-    # 主文PDF之外的PDF不要因为文件名含reference被剥离到参考文献审查；保留在主体审查中，
-    # 让后续参考文献剥离逻辑只处理正文里的References段落。
-    for pdf in pdf_files:
-        if pdf == file_categories["main_paper"]:
-            continue
-        if pdf not in file_categories["supplements"] and pdf not in file_categories["other"]:
-            file_categories["other"].append(pdf)
-    
-    return file_categories, all_files
-
-
-def _main_paper_score(path: Path):
-    name = path.name.lower()
-    stem = path.stem.lower()
-    score = 0
-    try:
-        score += min(path.stat().st_size / 1024 / 1024, 20)
-    except Exception:
-        pass
-    if any(token in stem for token in ("article", "paper", "main", "manuscript")):
-        score += 12
-    if re.search(r"(?:^|[_\-.])s(?:upp)?\d{1,3}(?:$|[_\-.])|supp|supplement|moesm|esm|appendix|附录|补充", stem):
-        score -= 25
-    if "reference" in stem or "references" in stem:
-        score -= 2
-    if re.search(r"\b(?:doi|s?10\.|s\d{5})", stem):
-        score += 1
-    return score
-
-
-def _is_missing_meta_value(value):
-    return value is None or value == "" or value == "N/A"
-
-
-def normalize_run_meta(meta, input_path=None, full_text=None):
-    """Fill display/report metadata that may be missing from older resume caches."""
-    normalized = ensure_runtime_meta(meta)
-    normalized.setdefault("prompt_version", PROMPT_VERSION)
-    normalized.setdefault("schema_version", SCHEMA_VERSION)
-    normalized.setdefault("adapter_version", ADAPTER_VERSION)
-    normalized.setdefault("risk_rule_version", RISK_RULE_VERSION)
-    if full_text is not None and _is_missing_meta_value(normalized.get("total_chars")):
-        normalized["total_chars"] = len(full_text or "")
-
-    if input_path is None:
-        return normalized
-
-    try:
-        path = Path(input_path)
-    except TypeError:
-        return normalized
-    if not path.exists():
-        return normalized
-
-    if path.is_dir():
-        normalized.setdefault("input_type", "directory")
-        if _is_missing_meta_value(normalized.get("extractor")):
-            normalized["extractor"] = "directory_multi_format"
-        if _is_missing_meta_value(normalized.get("extraction_method")):
-            normalized["extraction_method"] = normalized.get("extractor") or "directory_multi_format"
-        need_size = _is_missing_meta_value(normalized.get("size_mb"))
-        need_count = _is_missing_meta_value(normalized.get("total_files"))
-        if need_size or need_count:
-            try:
-                _, all_files = find_project_files(path)
-                if need_size:
-                    normalized["size_mb"] = round(sum(p.stat().st_size for p in all_files if p.exists()) / 1024 / 1024, 2)
-                if need_count:
-                    normalized["total_files"] = len(all_files)
-            except Exception:
-                pass
-    else:
-        if _is_missing_meta_value(normalized.get("size_mb")):
-            normalized["size_mb"] = round(path.stat().st_size / 1024 / 1024, 2)
-        if _is_missing_meta_value(normalized.get("extraction_method")):
-            normalized["extraction_method"] = normalized.get("source") or normalized.get("extractor") or f"{path.suffix.lower().lstrip('.') or 'file'}_text"
-
-    return normalized
 
 
 def extract_paper_identity(full_text: str, input_path: Path = None) -> Dict[str, Any]:

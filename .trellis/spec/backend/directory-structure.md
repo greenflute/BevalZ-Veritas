@@ -30,6 +30,7 @@ veritas/
 ├── local_analysis.py   # Local statistics and text chunking helpers
 ├── models.py           # Stable dataclass/report models and model conversion
 ├── preflight.py        # Critical capability preflight boundary
+├── project_files.py    # Project file discovery and run metadata helpers
 ├── renderers.py        # Markdown/HTML renderer boundary
 ├── risk_rule_helpers.py # Shared risk scoring/merge helpers for rules/rendering
 ├── risk_rules.py       # Versioned final risk scoring boundary
@@ -111,6 +112,10 @@ tests/
   Benford/numeric extraction, local statistical checks, and structure-aware text
   chunking. These helpers must remain deterministic and must not call LLMs or
   network providers.
+- `veritas/project_files.py` owns supported text-file extension constants,
+  project directory file discovery/classification, main-paper scoring, missing
+  metadata detection, and run metadata normalization. Keep this boundary
+  deterministic and filesystem-local; provider extraction remains elsewhere.
 - `veritas/followups.py` owns PubPeer/comment and journal-letter language,
   tone, article-identity, issue-normalization, context-building, prompt
   construction, draft artifact load/save, and namespace-aware generation

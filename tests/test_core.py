@@ -785,6 +785,11 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.local_analysis.extract_all_numbers is paper_audit.extract_all_numbers
     assert veritas.local_analysis.local_stat_check is paper_audit.local_stat_check
     assert veritas.local_analysis.smart_chunk_text is paper_audit.smart_chunk_text
+    assert veritas.project_files.SUPPORTED_TEXT_FILE_EXTENSIONS is paper_audit.SUPPORTED_TEXT_FILE_EXTENSIONS
+    assert veritas.project_files.find_project_files is paper_audit.find_project_files
+    assert veritas.project_files._main_paper_score is paper_audit._main_paper_score
+    assert veritas.project_files._is_missing_meta_value is paper_audit._is_missing_meta_value
+    assert veritas.project_files.normalize_run_meta is paper_audit.normalize_run_meta
     assert veritas.followups.normalize_followup_language is paper_audit.normalize_followup_language
     assert veritas.followups.normalize_followup_tone is paper_audit.normalize_followup_tone
     assert veritas.followups.normalize_article_identity is paper_audit.normalize_article_identity
@@ -3570,6 +3575,23 @@ def test_find_project_files_skips_generated_outputs(tmp_path):
     assert categories["main_paper"].name == "paper.pdf"
     assert not categories["references"]
     assert [p.name for p in categories["other"]] == ["paper_reference.pdf"]
+
+
+def test_normalize_run_meta_fills_directory_file_count_and_versions(tmp_path):
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "supplement.docx").write_text("supplement", encoding="utf-8")
+
+    meta = paper_audit.normalize_run_meta({}, input_path=tmp_path, full_text="abc")
+
+    assert meta["input_type"] == "directory"
+    assert meta["extractor"] == "directory_multi_format"
+    assert meta["extraction_method"] == "directory_multi_format"
+    assert meta["total_chars"] == 3
+    assert meta["total_files"] == 2
+    assert meta["prompt_version"] == paper_audit.PROMPT_VERSION
+    assert meta["schema_version"] == paper_audit.SCHEMA_VERSION
+    assert meta["adapter_version"] == paper_audit.ADAPTER_VERSION
+    assert meta["risk_rule_version"] == paper_audit.RISK_RULE_VERSION
 
 
 def test_render_evidence_html_converts_markdown_table():
