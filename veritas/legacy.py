@@ -48,6 +48,7 @@ from .runtime_config import (
     load_runtime_config as _build_runtime_config,
 )
 from .runtime_metadata import ensure_runtime_meta, runtime_metadata, runtime_utc_year
+from . import risk_rules as _risk_rules
 from .text_utils import _brief_text, _normalize_title, _title_tokens, _token_similarity
 from .models import (
     AuditFailure,
@@ -109,6 +110,10 @@ from .workspace import (
     record_run_workspace_json,
     run_workspace_path,
 )
+
+_risk_rules.runtime_utc_year = lambda: runtime_utc_year()
+apply_risk_rules = _risk_rules.apply_risk_rules
+merge_chunk_reports = _risk_rules.merge_chunk_reports
 
 # Windows/重定向控制台默认GBK时，emoji/中文符号可能触发UnicodeEncodeError；统一兜底为UTF-8。
 try:
@@ -4435,163 +4440,6 @@ def serve_web_runner(host="127.0.0.1", port=8765, open_browser=True, history_pat
     finally:
         httpd.server_close()
     return 0
-
-
-def apply_risk_rules(report: Dict[str, Any], stat_result=None, image_audit=None) -> Dict[str, Any]:
-    """Apply versioned deterministic rules for final risk and evidence risk score."""
-    report = dict(report or {})
-    checks = [dict(c) for c in report.get("checks", []) if isinstance(c, dict)]
-    checks = _downgrade_unverified_future_publication_checks(checks, current_year=runtime_utc_year())
-    checks = _downgrade_extraction_red_flags(checks)
-    warning_checks = [c for c in checks if "疑点" in str(c.get("verdict", ""))]
-    red_flags = sum(1 for c in checks if "红旗" in str(c.get("verdict", "")))
-    extraction_warnings = sum(1 for c in warning_checks if _is_extraction_limited_check(c))
-    evidence_warnings = len(warning_checks) - extraction_warnings
-    stat_adjustments = []
-    detector_high = 0
-    if isinstance(image_audit, dict):
-        for img in image_audit.get("images", []) or []:
-            detector = img.get("detector") or {}
-            try:
-                detector_score = float(detector.get("score"))
-            except (TypeError, ValueError):
-                detector_score = 0
-            if detector.get("status") == "ok" and detector_score >= 80:
-                detector_high += 1
-
-    if red_flags >= 2 and evidence_warnings >= 2:
-        risk_level = "严重证据冲突"
-    elif red_flags >= 1 or evidence_warnings >= 3:
-        risk_level = "高"
-    elif evidence_warnings >= 1 or extraction_warnings >= 1 or detector_high:
-        risk_level = "中"
-    else:
-        risk_level = "低"
-
-    raw_detection_score = red_flags * 35 + min(evidence_warnings, 10) * 5 + min(extraction_warnings, 10) + min(detector_high, 3) * 5
-    if stat_result and stat_result.get("benford_deviation"):
-        benford_weight = 30 if (red_flags or evidence_warnings) else 12
-        raw_detection_score += int(stat_result["benford_deviation"] * benford_weight)
-        if stat_result["benford_deviation"] > 0.45:
-            stat_adjustments.append("benford_high_deviation")
-    if stat_result and stat_result.get("p_value_abnormal", 0) > 0:
-        stat_adjustments.append("p_value_abnormal")
-
-    detection_score = min(100, raw_detection_score)
-    if risk_level == "严重证据冲突":
-        detection_score = max(detection_score, 85)
-    elif not red_flags and not evidence_warnings:
-        detection_score = min(detection_score, 60)
-
-    report["checks"] = checks
-    report["risk_level"] = risk_level
-    report["detection_score"] = detection_score
-    report["rule_version"] = RISK_RULE_VERSION
-    report["score_breakdown"] = {
-        "rule_version": RISK_RULE_VERSION,
-        "red_flags": red_flags,
-        "evidence_warnings": evidence_warnings,
-        "extraction_warnings": extraction_warnings,
-        "image_detector_high": detector_high,
-        "stat_adjustments": stat_adjustments,
-        "raw_score": raw_detection_score,
-    }
-    return report
-
-
-def merge_chunk_reports(reports, stat_result=None):
-    """合并多块审查结果：去重、合并检查项、重新评估风险等级
-
-    reports: [parse_report返回的dict, ...]
-    """
-    # 1. 收集所有检查项，按精确项和相近问题统合，避免同一风险跨分块重复出现。
-    all_checks = []
-    for i, r in enumerate(reports):
-        if r.get("parse_error"):
-            continue
-        for c in r.get("checks", []):
-            if not isinstance(c, dict):
-                continue
-            candidate = dict(c)
-            candidate["_source_chunk"] = i + 1
-            for existing in all_checks:
-                if _same_or_similar_check(existing, candidate):
-                    _merge_check_into(existing, candidate, i)
-                    break
-            else:
-                candidate["_source_chunks"] = [i + 1]
-                all_checks.append(candidate)
-
-    all_checks = _downgrade_unverified_future_publication_checks(all_checks, current_year=runtime_utc_year())
-    all_checks = _downgrade_extraction_red_flags(all_checks)
-
-    # 2. 统计红旗/疑点数量。OCR/表格提取质量问题单独计数，避免低证据噪声堆叠成高风险。
-    red_flags = sum(1 for c in all_checks if "红旗" in c.get("verdict", ""))
-    warning_checks = [c for c in all_checks if "疑点" in c.get("verdict", "")]
-    extraction_warnings = sum(1 for c in warning_checks if _is_extraction_limited_check(c))
-    evidence_warnings = len(warning_checks) - extraction_warnings
-    warnings = len(warning_checks)
-
-    # 3. 重新评估风险等级
-    if red_flags >= 3:
-        risk_level = "高"
-    elif red_flags >= 1 or evidence_warnings >= 3:
-        risk_level = "中"
-    elif evidence_warnings >= 1 or extraction_warnings >= 1:
-        risk_level = "低"
-    else:
-        risk_level = "低"
-
-    # 结合统计结果调整
-    stat_adjustments = []
-    if stat_result:
-        if stat_result.get("benford_deviation") and stat_result["benford_deviation"] > 0.3:
-            stat_adjustments.append("benford_high_deviation")
-            if red_flags or evidence_warnings:
-                risk_level = _max_risk(risk_level, "中")
-        if stat_result.get("p_value_abnormal", 0) > 2:
-            stat_adjustments.append("p_value_abnormal")
-            risk_level = _max_risk(risk_level, "中")
-
-    # 4. 计算证据风险分
-    raw_detection_score = red_flags * 35 + min(evidence_warnings, 10) * 5 + min(extraction_warnings, 10)
-    if stat_result and stat_result.get("benford_deviation"):
-        benford_weight = 30 if (red_flags or evidence_warnings) else 12
-        raw_detection_score += int(stat_result["benford_deviation"] * benford_weight)
-    detection_score = min(100, raw_detection_score)
-    if red_flags == 0:
-        detection_score = min(detection_score, 85)
-
-    # 5. 用最终合并/降级后的检查项重建summary和conclusion，避免逐段原始措辞留下误导性的红旗结论。
-    merged_summary = _build_merged_summary(len([r for r in reports if not r.get("parse_error")]) or len(reports),
-                                           risk_level, red_flags, evidence_warnings, extraction_warnings)
-    merged_conclusion = _build_merged_conclusion(reports, all_checks, risk_level, red_flags,
-                                                evidence_warnings, extraction_warnings, stat_adjustments)
-
-    # 清理临时字段
-    for c in all_checks:
-        c.pop("_source_chunk", None)
-        c.pop("_source_chunks", None)
-
-    return {
-        "summary": merged_summary,
-        "risk_level": risk_level,
-        "detection_score": detection_score,
-        "score_breakdown": {
-            "rule_version": RISK_RULE_VERSION,
-            "red_flags": red_flags,
-            "evidence_warnings": evidence_warnings,
-            "extraction_warnings": extraction_warnings,
-            "image_detector_high": 0,
-            "total_warnings": warnings,
-            "stat_adjustments": stat_adjustments,
-            "raw_score": raw_detection_score,
-        },
-        "checks": all_checks,
-        "conclusion": merged_conclusion,
-        "_merged_from": len(reports),
-        "rule_version": RISK_RULE_VERSION,
-    }
 
 
 # ══════════════════════════════════════════════════════════════

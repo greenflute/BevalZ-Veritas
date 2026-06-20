@@ -105,6 +105,9 @@ tests/
   summary/conclusion helpers shared by risk scoring and renderers. Runtime-year
   future-publication checks also live there; legacy callers pass the current
   runtime year explicitly to preserve compatibility with existing monkeypatches.
+- `veritas/risk_rules.py` owns `apply_risk_rules` and `merge_chunk_reports`;
+  `veritas.legacy` re-exports the same function objects for `paper_audit`
+  compatibility.
 - `veritas/renderers.py` accepts `AuditReportModel` / `EvidenceFinding` and
   converts them before delegating to the existing Markdown and HTML renderers.
 - `veritas/run.py` exposes the run orchestration boundary without requiring

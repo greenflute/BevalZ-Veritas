@@ -7,8 +7,8 @@ from pathlib import Path
 import time
 from typing import Any, Callable, Dict, Iterable, List
 
-from .legacy import apply_risk_rules
 from .report_schema import parse_report
+from .risk_rules import apply_risk_rules
 from .versions import PROMPT_VERSION, RISK_RULE_VERSION, SCHEMA_VERSION
 
 EVAL_PROMPT_VERSION = PROMPT_VERSION
