@@ -62,6 +62,7 @@ Questions to answer:
 - `veritas.preflight_types.run_preflight_once(preflight_state, capability, runner) -> PreflightResult`
 - `preflight_mineru(timeout=10) -> PreflightResult`
 - `preflight_text_llm(timeout=10) -> PreflightResult`
+- `failed_audit_payload(failure, input_path, meta=None) -> dict`
 - `save_failed_audit_diagnostics(failure, input_path, meta=None) -> (Path, Path)`
 
 ### 3. Contracts
@@ -86,6 +87,9 @@ Questions to answer:
 - Preflight success can be reused only through the in-memory `preflight_state` for the current process run. Do not persist preflight success into resume caches.
 - `paper_audit.PreflightResult`, `veritas.preflight.PreflightResult`, and
   `veritas.preflight_types.PreflightResult` must remain the same class object.
+- Stable failed diagnostic JSON payload construction lives in
+  `veritas/failed_diagnostics.py` and remains re-exported through
+  `paper_audit` for compatibility.
 - Provider-specific preflight functions may remain in the legacy compatibility
   layer while they depend on legacy module globals, but the result type and
   per-run cache helper belong in `veritas/preflight_types.py`.
