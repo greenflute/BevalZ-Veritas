@@ -7,7 +7,6 @@ from .legacy import (
     ProductionReferenceLookupAdapter,
     ProductionTextLLMAdapter,
     default_audit_adapters,
-    fake_audit_adapters,
 )
 from .adapter_types import (
     AdapterResult,
@@ -17,6 +16,15 @@ from .adapter_types import (
     MinerUAdapter,
     ReferenceLookupAdapter,
     TextLLMAdapter,
+)
+from .fake_adapters import (
+    FakeImageDetectorAdapter,
+    FakeImageSemanticAdapter,
+    FakeMinerUAdapter,
+    FakeReferenceLookupAdapter,
+    FakeScenarioMixin,
+    FakeTextLLMAdapter,
+    fake_audit_adapters,
 )
 
 __all__ = [
@@ -32,6 +40,12 @@ __all__ = [
     "ProductionReferenceLookupAdapter",
     "ProductionImageSemanticAdapter",
     "ProductionImageDetectorAdapter",
+    "FakeScenarioMixin",
+    "FakeMinerUAdapter",
+    "FakeTextLLMAdapter",
+    "FakeReferenceLookupAdapter",
+    "FakeImageSemanticAdapter",
+    "FakeImageDetectorAdapter",
     "default_audit_adapters",
     "fake_audit_adapters",
 ]

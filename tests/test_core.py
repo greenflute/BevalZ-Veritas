@@ -668,6 +668,10 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.adapters.AuditAdapters is paper_audit.AuditAdapters
     assert veritas.adapter_types.TextLLMAdapter is paper_audit.TextLLMAdapter
     assert veritas.adapters.TextLLMAdapter is paper_audit.TextLLMAdapter
+    assert veritas.fake_adapters.FakeTextLLMAdapter is paper_audit.FakeTextLLMAdapter
+    assert veritas.adapters.FakeTextLLMAdapter is paper_audit.FakeTextLLMAdapter
+    assert veritas.fake_adapters.fake_audit_adapters is paper_audit.fake_audit_adapters
+    assert veritas.adapters.fake_audit_adapters is paper_audit.fake_audit_adapters
 
 
 def test_paper_audit_import_still_allows_legacy_monkeypatches(monkeypatch):

@@ -930,7 +930,10 @@ from veritas.runtime_config import RuntimeConfig
 - Failure and skipped results must carry `error_class`, `message`, and
   structured `details` without requiring callers to inspect provider-specific
   payloads.
-- Production and fake adapter implementation classes may remain in the legacy
+- Fake adapter implementation classes live in `veritas/fake_adapters.py` and
+  remain re-exported through `paper_audit` and `veritas.adapters` for
+  compatibility.
+- Production adapter implementation classes may remain in the legacy
   compatibility layer while they depend on legacy provider functions, but they
   must implement the stable adapter interfaces and return `AdapterResult`.
 
