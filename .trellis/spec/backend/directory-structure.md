@@ -29,6 +29,7 @@ veritas/
 ├── run.py              # Run request/result and orchestration boundary
 └── workspace.py        # Per-run workspace boundary
 └── file_utils.py       # Shared safe-name and JSON file helpers
+└── report_schema.py    # Strict LLM evidence schema parser
 tests/
 └── test_core.py        # Core unit and smoke coverage
 ```
@@ -67,6 +68,9 @@ tests/
 - `veritas/file_utils.py` owns `_safe_name`, `_json_load`, `_json_save`, and
   `_load_merged_json_dicts`; these remain re-exported through `paper_audit` for
   compatibility with existing tests and local scripts.
+- `veritas/report_schema.py` owns strict LLM evidence schema parsing and
+  normalization; `paper_audit` keeps compatibility by re-exporting the same
+  parser function objects through `veritas.legacy`.
 - `veritas/renderers.py` accepts `AuditReportModel` / `EvidenceFinding` and
   converts them before delegating to the existing Markdown and HTML renderers.
 - `veritas/run.py` exposes the run orchestration boundary without requiring
