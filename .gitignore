@@ -1,5 +1,6 @@
 # Secrets / local config
 config.py
+!veritas/config.py
 .env
 *.key
 *.pem

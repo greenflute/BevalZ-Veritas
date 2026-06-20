@@ -100,6 +100,9 @@ tests/
 - `veritas/versions.py` owns prompt, schema, adapter, and risk-rule version
   constants; compatibility modules should import these constants rather than
   redefining them.
+- `veritas/config.py` owns runtime configuration loading/application helpers.
+  Namespace-aware helpers let `veritas.legacy` preserve historical global
+  monkeypatch behavior without making `veritas.config` import legacy.
 - `veritas/risk_rule_helpers.py` owns extraction-limited classification,
   OCR/table red-flag downgrade, check similarity/merge, and merged
   summary/conclusion helpers shared by risk scoring and renderers. Runtime-year

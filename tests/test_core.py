@@ -76,6 +76,42 @@ def test_runtime_config_module_loads_environment_without_legacy_globals():
     assert cfg.llm_retries == 4
 
 
+def test_config_boundary_loads_from_namespace_without_importing_legacy(monkeypatch):
+    fake_config = types.SimpleNamespace(
+        LLM_API_KEY="module-llm-key",
+        LLM_API_URL="https://llm.example.test/v1/chat/completions",
+        LLM_MODEL="module-model",
+        MINERU_TOKEN="module-mineru-token",
+        MINERU_BASE="https://mineru.example.test",
+        IMAGE_SEMANTIC_API_KEY="module-vision-key",
+        IMAGE_SEMANTIC_API_URL="https://vision.example.test/chat",
+        IMAGE_SEMANTIC_MODEL="module-vision-model",
+    )
+    fake_importlib = types.SimpleNamespace(
+        import_module=lambda name: fake_config,
+        reload=lambda module: module,
+        invalidate_caches=lambda: None,
+    )
+    namespace = {
+        "LLM_API_URL": "https://default-llm.example.test/chat",
+        "LLM_MODEL": "default-model",
+        "MINERU_BASE": "https://default-mineru.example.test",
+        "GLM_API_URL": "https://default-vision.example.test/chat",
+        "GLM_VISION_MODEL": "default-vision",
+        "importlib": fake_importlib,
+        "print": lambda *args, **kwargs: None,
+    }
+
+    cfg = veritas.config.load_runtime_config_from_namespace(namespace, verbose=False)
+    applied = veritas.config.apply_runtime_config_to_namespace(cfg, namespace)
+
+    assert cfg.text_llm.api_key == "module-llm-key"
+    assert cfg.mineru.api_key == "module-mineru-token"
+    assert applied is cfg
+    assert namespace["LLM_API_KEY"] == "module-llm-key"
+    assert namespace["GLM_API_KEY"] == "module-vision-key"
+
+
 def test_report_action_service_mode_loads_runtime_config(monkeypatch):
     fake_config = types.SimpleNamespace(
         LLM_API_KEY="llm-key",
@@ -653,6 +689,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.runtime_config.RuntimeConfig is paper_audit.RuntimeConfig
     assert veritas.config.RuntimeConfig is paper_audit.RuntimeConfig
     assert veritas.config.CapabilityConfig is paper_audit.CapabilityConfig
+    assert callable(veritas.config.load_runtime_config_from_namespace)
+    assert callable(veritas.config.apply_runtime_config_to_namespace)
     assert veritas.preflight_types.PreflightResult is paper_audit.PreflightResult
     assert veritas.preflight.PreflightResult is paper_audit.PreflightResult
     assert veritas.preflight.run_preflight_once is paper_audit.run_preflight_once

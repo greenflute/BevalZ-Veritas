@@ -41,11 +41,12 @@ from .fake_adapters import (
 )
 from .file_utils import _json_load, _json_save, _load_merged_json_dicts, _safe_name
 from .html_utils import _html_escape, _json_for_script_tag
-from .runtime_config import (
+from .config import (
     CapabilityConfig,
     RuntimeConfig,
-    default_runtime_config as _build_default_runtime_config,
-    load_runtime_config as _build_runtime_config,
+    apply_runtime_config_to_namespace,
+    default_runtime_config_from_namespace,
+    load_runtime_config_from_namespace,
 )
 from .runtime_metadata import ensure_runtime_meta, runtime_metadata, runtime_utc_year
 from . import risk_rules as _risk_rules
@@ -271,54 +272,18 @@ GLM_API_KEY = ""
 GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 GLM_VISION_MODEL = "glm-4.6v-flash"
 
-def _runtime_config_defaults() -> Dict[str, Any]:
-    return {
-        "LLM_API_KEY": LLM_API_KEY,
-        "LLM_API_URL": LLM_API_URL,
-        "LLM_MODEL": LLM_MODEL,
-        "MINERU_TOKEN": MINERU_TOKEN,
-        "MINERU_BASE": MINERU_BASE,
-        "IMAGE_SEMANTIC_API_KEY": GLM_API_KEY,
-        "IMAGE_SEMANTIC_API_URL": GLM_API_URL,
-        "IMAGE_SEMANTIC_MODEL": GLM_VISION_MODEL,
-        "LLM_TIMEOUT": LLM_TIMEOUT,
-        "LLM_RETRIES": LLM_RETRIES,
-    }
-
-
 def default_runtime_config() -> RuntimeConfig:
-    return _build_default_runtime_config(defaults=_runtime_config_defaults())
+    return default_runtime_config_from_namespace(globals())
 
 
 def load_runtime_config(config_module_name: str = "config", env=os.environ, verbose: bool = True) -> RuntimeConfig:
     """Load config.py and environment variables explicitly for a CLI run."""
-    return _build_runtime_config(
-        config_module_name=config_module_name,
-        env=env,
-        verbose=verbose,
-        defaults=_runtime_config_defaults(),
-        import_module=importlib.import_module,
-        reload_module=importlib.reload,
-        invalidate_caches=importlib.invalidate_caches,
-        printer=print,
-    )
+    return load_runtime_config_from_namespace(globals(), config_module_name=config_module_name, env=env, verbose=verbose)
 
 
 def apply_runtime_config(runtime_config: RuntimeConfig):
     """Apply explicit runtime config to the legacy module globals used by current code."""
-    global LLM_API_KEY, LLM_API_URL, LLM_MODEL, MINERU_TOKEN, MINERU_BASE
-    global GLM_API_KEY, GLM_API_URL, GLM_VISION_MODEL, LLM_TIMEOUT, LLM_RETRIES
-    LLM_API_KEY = runtime_config.text_llm.api_key
-    LLM_API_URL = runtime_config.text_llm.api_url or LLM_API_URL
-    LLM_MODEL = runtime_config.text_llm.model or LLM_MODEL
-    MINERU_TOKEN = runtime_config.mineru.api_key
-    MINERU_BASE = runtime_config.mineru.base_url or MINERU_BASE
-    GLM_API_KEY = runtime_config.image_semantic.api_key
-    GLM_API_URL = runtime_config.image_semantic.api_url or GLM_API_URL
-    GLM_VISION_MODEL = runtime_config.image_semantic.model or GLM_VISION_MODEL
-    LLM_TIMEOUT = int(runtime_config.llm_timeout)
-    LLM_RETRIES = int(runtime_config.llm_retries)
-    return runtime_config
+    return apply_runtime_config_to_namespace(runtime_config, globals())
 
 
 def format_failed_audit_markdown(failure: AuditFailure, input_path: Path, meta: Dict[str, Any] = None) -> str:
