@@ -91,9 +91,10 @@ Questions to answer:
 - Stable failed diagnostic JSON payload construction and failure-to-`AuditFailure`
   conversion helpers live in `veritas/failed_diagnostics.py` and remain
   re-exported through `paper_audit` for compatibility.
-- Provider-specific preflight functions may remain in the legacy compatibility
-  layer while they depend on legacy module globals, but the result type and
-  per-run cache helper belong in `veritas/preflight_types.py`.
+- Provider-specific preflight functions live in `veritas/preflight.py`.
+  `veritas.legacy` may wrap the namespace-aware helpers with its own globals
+  so historical `paper_audit` monkeypatch behavior remains compatible.
+  The result type and per-run cache helper belong in `veritas/preflight_types.py`.
 
 ### 4. Validation & Error Matrix
 

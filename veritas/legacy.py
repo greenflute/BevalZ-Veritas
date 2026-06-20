@@ -60,6 +60,7 @@ from .models import (
     ReferenceAuditModel,
     RunMetadataModel,
 )
+from .preflight import _chat_completions_endpoint, preflight_mineru_from_namespace, preflight_text_llm_from_namespace
 from .preflight_types import PreflightResult, run_preflight_once
 from .production_adapters import (
     ProductionImageDetectorAdapter,
@@ -456,67 +457,11 @@ def _effective_limit(limit, total: int) -> int:
 
 
 def preflight_mineru(timeout=10) -> PreflightResult:
-    """Check MinerU reachability/auth before starting formal extraction."""
-    if not MINERU_TOKEN:
-        return PreflightResult("mineru", False, "missing_required_config", "MINERU_TOKEN未配置")
-    if not MINERU_BASE:
-        return PreflightResult("mineru", False, "missing_required_config", "MINERU_BASE未配置")
-
-    url = f"{MINERU_BASE.rstrip('/')}/api/v4/extract-results/batch/__paper_audit_preflight__"
-    headers = {"Authorization": f"Bearer {MINERU_TOKEN}", "Accept": "application/json", "User-Agent": "PaperAudit/1.0"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
-        status = getattr(resp, "status_code", None)
-        text = getattr(resp, "text", "") or ""
-        details = {"http_status": status, "endpoint": url, "response_preview": text[:300]}
-        if status in {401, 403}:
-            return PreflightResult("mineru", False, "provider_auth_failed", "MinerU认证失败，请检查MINERU_TOKEN。", details)
-        if status and status >= 500:
-            return PreflightResult("mineru", False, "provider_unavailable", f"MinerU服务暂不可用: HTTP {status}", details)
-        return PreflightResult("mineru", True, details=details)
-    except Exception as e:
-        return PreflightResult("mineru", False, "provider_unavailable", f"MinerU预检请求失败: {e}", {"endpoint": url})
+    return preflight_mineru_from_namespace(globals(), timeout=timeout)
 
 
 def preflight_text_llm(timeout=10) -> PreflightResult:
-    """Check the text LLM provider before starting semantic chunk review."""
-    if not LLM_API_KEY:
-        return PreflightResult("text_llm", False, "missing_required_config", "LLM_API_KEY未配置")
-    if not LLM_API_URL:
-        return PreflightResult("text_llm", False, "missing_required_config", "LLM_API_URL未配置")
-    if not LLM_MODEL:
-        return PreflightResult("text_llm", False, "missing_required_config", "LLM_MODEL未配置")
-
-    payload = {
-        "model": LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": "Reply with OK."},
-            {"role": "user", "content": "OK"},
-        ],
-        "temperature": 0,
-        "max_tokens": 1,
-    }
-    try:
-        resp = requests.post(
-            _chat_completions_endpoint(LLM_API_URL),
-            json=payload,
-            headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json", "User-Agent": "PaperAudit/1.0"},
-            timeout=timeout,
-        )
-        status = getattr(resp, "status_code", None)
-        details = {"http_status": status, "endpoint": _chat_completions_endpoint(LLM_API_URL), "model": LLM_MODEL}
-        if status in {401, 403}:
-            return PreflightResult("text_llm", False, "provider_auth_failed", "文本LLM认证失败，请检查LLM_API_KEY。", details)
-        if status and status >= 500:
-            return PreflightResult("text_llm", False, "provider_unavailable", f"文本LLM服务暂不可用: HTTP {status}", details)
-        if status and status >= 400:
-            return PreflightResult("text_llm", False, "preflight_http_error", f"文本LLM预检失败: HTTP {status}", details)
-        data = resp.json()
-        if not data.get("choices"):
-            return PreflightResult("text_llm", False, "preflight_invalid_response", "文本LLM预检未返回choices。", {**details, "response": data})
-        return PreflightResult("text_llm", True, details=details)
-    except Exception as e:
-        return PreflightResult("text_llm", False, "provider_unavailable", f"文本LLM预检请求失败: {e}", {"endpoint": _chat_completions_endpoint(LLM_API_URL), "model": LLM_MODEL})
+    return preflight_text_llm_from_namespace(globals(), timeout=timeout)
 
 
 def run_adapter_e2e_audit(
@@ -705,16 +650,6 @@ def _http_request(url, method="GET", headers=None, data=None, timeout=60):
         resp = requests.request(method, url, headers=headers, data=data, timeout=timeout)
     resp.raise_for_status()
     return resp.content, resp.status_code
-
-
-def _chat_completions_endpoint(api_url: str) -> str:
-    """Accept either an OpenAI-compatible base URL or a full chat completions URL."""
-    url = str(api_url or "").strip().rstrip("/")
-    if not url:
-        return url
-    if url.endswith("/chat/completions"):
-        return url
-    return f"{url}/chat/completions"
 
 
 def mineru_precision_extract_by_url(pdf_url, model_version="vlm", language="ch",

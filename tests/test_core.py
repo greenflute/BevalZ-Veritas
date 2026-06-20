@@ -298,6 +298,38 @@ def test_preflight_text_llm_performs_lightweight_call(monkeypatch):
     assert calls[0]["headers"]["Authorization"] == "Bearer llm-key"
 
 
+def test_preflight_boundary_uses_namespace_without_importing_legacy():
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "OK"}}]}
+
+    requests_stub = types.SimpleNamespace(
+        post=lambda url, json=None, headers=None, timeout=None: calls.append({
+            "url": url,
+            "json": json,
+            "headers": headers,
+            "timeout": timeout,
+        }) or FakeResponse()
+    )
+    namespace = {
+        "LLM_API_KEY": "namespace-key",
+        "LLM_API_URL": "https://llm.example.test/v1",
+        "LLM_MODEL": "namespace-model",
+        "requests": requests_stub,
+    }
+
+    result = veritas.preflight.preflight_text_llm_from_namespace(namespace, timeout=3)
+
+    assert result.ok
+    assert calls[0]["url"] == "https://llm.example.test/v1/chat/completions"
+    assert calls[0]["json"]["model"] == "namespace-model"
+    assert calls[0]["headers"]["Authorization"] == "Bearer namespace-key"
+
+
 def test_preflight_failure_to_audit_failure_has_retry_guidance():
     result = paper_audit.PreflightResult(
         capability="text_llm",
@@ -694,6 +726,9 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.preflight_types.PreflightResult is paper_audit.PreflightResult
     assert veritas.preflight.PreflightResult is paper_audit.PreflightResult
     assert veritas.preflight.run_preflight_once is paper_audit.run_preflight_once
+    assert veritas.preflight._chat_completions_endpoint is paper_audit._chat_completions_endpoint
+    assert callable(veritas.preflight.preflight_mineru_from_namespace)
+    assert callable(veritas.preflight.preflight_text_llm_from_namespace)
     assert veritas.preflight.preflight_failure_to_audit_failure is paper_audit.preflight_failure_to_audit_failure
     assert veritas.run_types.RunRequest is paper_audit.RunRequest
     assert veritas.run_types.RunResult is paper_audit.RunResult
