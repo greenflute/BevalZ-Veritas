@@ -251,6 +251,8 @@ result = generate_and_save_followup_draft(
   without a separate security review.
 - `POST /api/runs` accepts only `input_path`, optional `output`, and `fresh`.
   The server always adds `--json --no-open`.
+- Web Runner path resolution helpers live in `veritas/web_runner_paths.py` and
+  remain re-exported through `paper_audit` for compatibility.
 - If `input_path` is only a basename and does not exist in the service current
   working directory, the server may resolve it before spawning the CLI by doing
   a bounded local basename search. Search roots are the current working

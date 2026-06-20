@@ -676,6 +676,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.adapters.ProductionTextLLMAdapter is paper_audit.ProductionTextLLMAdapter
     assert veritas.production_adapters.default_audit_adapters is paper_audit.default_audit_adapters
     assert veritas.adapters.default_audit_adapters is paper_audit.default_audit_adapters
+    assert veritas.web_runner_paths.resolve_web_runner_input_path is paper_audit.resolve_web_runner_input_path
+    assert veritas.web_runner_paths._web_runner_common_search_roots is paper_audit._web_runner_common_search_roots
 
 
 def test_paper_audit_import_still_allows_legacy_monkeypatches(monkeypatch):
