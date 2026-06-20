@@ -422,6 +422,8 @@ if dependency:
   - `workspace_artifacts`
   - `meta`
 - Root report files remain the latest shortcuts. Workspace artifact files are copied snapshots and must not be overwritten by later runs.
+- Per-run workspace helpers live in `veritas/workspace.py` and remain
+  re-exported through `paper_audit` for compatibility.
 
 ### 4. Validation & Error Matrix
 
