@@ -3773,8 +3773,8 @@ class _RunAuditOrchestrator:
             result_meta=result_meta,
         )
 
-    def run(self) -> RunResult:
-        mineru_failed_result = _run_mineru_preflight_if_needed(
+    def _run_mineru_preflight(self):
+        return _run_mineru_preflight_if_needed(
             self.context.use_mineru_default,
             self.preflight_state,
             self.record_preflight,
@@ -3783,12 +3783,9 @@ class _RunAuditOrchestrator:
             self.fail_run,
             self.preflight_results,
         )
-        if mineru_failed_result:
-            return mineru_failed_result
-        progress_bar(0, 5, "初始化完成")
 
-        # ─── 阶段1：文本提取（支持单个文件/整个论文目录） ───
-        stage1_result = _run_stage1_text_extraction(
+    def _run_stage1_text_extraction(self):
+        return _run_stage1_text_extraction(
             self.input_path,
             self.args,
             self.context.output_dir,
@@ -3799,6 +3796,68 @@ class _RunAuditOrchestrator:
             self.context.run_runtime,
             self.preflight_results,
         )
+
+    def _run_text_llm_preflight(self, meta):
+        return _run_text_llm_preflight(
+            self.preflight_state,
+            self.record_preflight,
+            self.context.retry_command,
+            self.completed_stages,
+            self.fail_run,
+            self.preflight_results,
+            meta,
+        )
+
+    def _run_text_llm_review(self, audit_text, stat_result, meta):
+        return _run_text_llm_review_stage(
+            audit_text,
+            self.args,
+            self.context.resume_dir,
+            self.context.allow_llm_cache_read,
+            self.context.allow_llm_cache_write,
+            stat_result,
+            meta,
+            self.completed_stages,
+            self.context.retry_command,
+        )
+
+    def _apply_image_risk_and_evidence(self, meta, full_text, extracted_file_texts, report, stat_result):
+        return _apply_image_risk_and_evidence_stages(
+            self.input_path,
+            self.context.output_dir,
+            self.args,
+            self.context.resume_dir,
+            meta,
+            full_text,
+            extracted_file_texts,
+            report,
+            stat_result,
+            self.completed_stages,
+            self.context.retry_command,
+        )
+
+    def _finalize(self, report, meta, stat_result, reference_audit, resource_audit):
+        return _finalize_run_audit_result(
+            self.input_path,
+            self.args,
+            report,
+            meta,
+            stat_result,
+            reference_audit,
+            resource_audit,
+            self.context.run_workspace,
+            self.context.resume_dir,
+            self.context.has_pdf_input,
+        )
+
+    def run(self) -> RunResult:
+        mineru_failed_result = self._run_mineru_preflight()
+        if mineru_failed_result:
+            return mineru_failed_result
+        progress_bar(0, 5, "初始化完成")
+
+        # ─── 阶段1：文本提取（支持单个文件/整个论文目录） ───
+        stage1_result = self._run_stage1_text_extraction()
         if stage1_result.failure:
             return self.fail_run(stage1_result.failure, diagnostics_meta=stage1_result.diagnostics_meta)
         full_text = stage1_result.full_text
@@ -3814,64 +3873,23 @@ class _RunAuditOrchestrator:
         )
 
         # ─── 阶段3：智能分块 + LLM语义审查（冗余机制） ───
-        text_llm_failed_result = _run_text_llm_preflight(
-            self.preflight_state,
-            self.record_preflight,
-            self.context.retry_command,
-            self.completed_stages,
-            self.fail_run,
-            self.preflight_results,
-            meta,
-        )
+        text_llm_failed_result = self._run_text_llm_preflight(meta)
         if text_llm_failed_result:
             return text_llm_failed_result
 
-        llm_result = _run_text_llm_review_stage(
-            audit_text,
-            self.args,
-            self.context.resume_dir,
-            self.context.allow_llm_cache_read,
-            self.context.allow_llm_cache_write,
-            stat_result,
-            meta,
-            self.completed_stages,
-            self.context.retry_command,
-        )
+        llm_result = self._run_text_llm_review(audit_text, stat_result, meta)
         if llm_result.failure:
             return self.fail_run(llm_result.failure, diagnostics_meta=meta)
         report = llm_result.report
 
         # ─── 图像合理性检测：使用MinerU已保存zip中的图片/目录图片生成报告清单 ───
-        image_stage = _apply_image_risk_and_evidence_stages(
-            self.input_path,
-            self.context.output_dir,
-            self.args,
-            self.context.resume_dir,
-            meta,
-            full_text,
-            extracted_file_texts,
-            report,
-            stat_result,
-            self.completed_stages,
-            self.context.retry_command,
-        )
+        image_stage = self._apply_image_risk_and_evidence(meta, full_text, extracted_file_texts, report, stat_result)
         if image_stage.failure:
             return self.fail_run(image_stage.failure, diagnostics_meta=meta)
         report = image_stage.report
 
         # ─── 阶段5：生成报告 ───
-        return _finalize_run_audit_result(
-            self.input_path,
-            self.args,
-            report,
-            meta,
-            stat_result,
-            reference_audit,
-            resource_audit,
-            self.context.run_workspace,
-            self.context.resume_dir,
-            self.context.has_pdf_input,
-        )
+        return self._finalize(report, meta, stat_result, reference_audit, resource_audit)
 
 
 
