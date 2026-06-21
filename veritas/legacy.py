@@ -161,6 +161,7 @@ from . import run_logging as _run_logging
 from .run_logging import (
     _allow_llm_cache_read,
     detect_pdf_input,
+    extract_cache_matches,
     get_output_base,
     get_resume_dir,
     progress_bar,
@@ -4159,7 +4160,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     extract_cache_path = resume_dir / "stage1_extract.json"
     cached_extract = None if args.no_resume else _json_load(extract_cache_path)
     extracted_file_texts = []
-    if cached_extract and cached_extract.get("input") == str(input_path.resolve()) and cached_extract.get("use_mineru") == use_mineru_default and cached_extract.get("cache_version") == EXTRACT_CACHE_VERSION:
+    if extract_cache_matches(cached_extract, input_path, use_mineru_default, EXTRACT_CACHE_VERSION):
         full_text = cached_extract.get("full_text", "")
         meta = cached_extract.get("meta", {})
         extracted_file_texts = cached_extract.get("file_texts") or []

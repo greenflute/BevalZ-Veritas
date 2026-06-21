@@ -14,6 +14,7 @@ __all__ = [
     "resume_event",
     "_allow_llm_cache_read",
     "detect_pdf_input",
+    "extract_cache_matches",
     "run_cache_use_manifest",
     "run_input_manifest",
     "record_preflight_result",
@@ -106,6 +107,17 @@ def detect_pdf_input(input_path, pdf_suffixes=None):
         except Exception:
             return False
     return False
+
+
+def extract_cache_matches(cached_extract, input_path, use_mineru, cache_version):
+    """Return whether a stage-1 extraction cache matches the current run."""
+    if not isinstance(cached_extract, dict):
+        return False
+    return (
+        cached_extract.get("input") == str(Path(input_path).resolve())
+        and cached_extract.get("use_mineru") == use_mineru
+        and cached_extract.get("cache_version") == cache_version
+    )
 
 
 def run_input_manifest(input_path, runtime):

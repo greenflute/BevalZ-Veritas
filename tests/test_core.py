@@ -676,6 +676,22 @@ def test_run_scope_flags_from_args_formats_limits():
     ]
 
 
+def test_extract_cache_matches_requires_input_mineru_and_version(tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("pdf", encoding="utf-8")
+    cached = {
+        "input": str(input_path.resolve()),
+        "use_mineru": True,
+        "cache_version": 7,
+    }
+
+    assert paper_audit.extract_cache_matches(cached, input_path, True, 7) is True
+    assert paper_audit.extract_cache_matches(cached, input_path, False, 7) is False
+    assert paper_audit.extract_cache_matches(cached, input_path, True, 8) is False
+    assert paper_audit.extract_cache_matches(cached, tmp_path / "other.pdf", True, 7) is False
+    assert paper_audit.extract_cache_matches(None, input_path, True, 7) is False
+
+
 def test_run_input_manifest_records_local_file_state(tmp_path):
     input_path = tmp_path / "paper.txt"
     input_path.write_text("abc", encoding="utf-8")
@@ -1181,6 +1197,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.resume_event is paper_audit.resume_event
     assert veritas.run_logging._allow_llm_cache_read is paper_audit._allow_llm_cache_read
     assert veritas.run_logging.detect_pdf_input is paper_audit.detect_pdf_input
+    assert veritas.run_logging.extract_cache_matches is paper_audit.extract_cache_matches
     assert veritas.run_logging.run_cache_use_manifest is paper_audit.run_cache_use_manifest
     assert veritas.run_logging.run_input_manifest is paper_audit.run_input_manifest
     assert veritas.run_logging.run_extraction_route is paper_audit.run_extraction_route
