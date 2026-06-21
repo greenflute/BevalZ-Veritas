@@ -83,6 +83,34 @@ def _report_action_reference_issues(reference_audit):
     return issues
 
 
+def _report_action_image_issues(image_audit):
+    issues = []
+    for img in (image_audit.get("images") or [])[:8]:
+        sem = img.get("semantic") or {}
+        detector = img.get("detector") or {}
+        if img.get("risk") == "local_warning" or sem.get("reasonability") in {"需人工核对", "可疑"} or (detector.get("score") or 0) >= 50:
+            issues.append({
+                "file": img.get("file"),
+                "local_issues": img.get("issues", []),
+                "semantic": _brief_text(sem.get("summary", ""), 360),
+                "detector_score": detector.get("score"),
+            })
+    return issues
+
+
+def _report_action_resource_issues(resource_audit):
+    issues = []
+    for issue in (resource_audit.get("issues") or [])[:8]:
+        issues.append({
+            "index": issue.get("index"),
+            "url": issue.get("url"),
+            "type": issue.get("type"),
+            "status": issue.get("status"),
+            "problem": issue.get("problem"),
+        })
+    return issues
+
+
 def _report_action_context(report, pdf_path, meta, stat_result):
     meta = meta or {}
     paper_identity = meta.get("paper_identity") or {}
@@ -97,27 +125,9 @@ def _report_action_context(report, pdf_path, meta, stat_result):
     reference_audit = (meta or {}).get("reference_audit") or {}
     ref_issues = _report_action_reference_issues(reference_audit)
     image_audit = (meta or {}).get("image_audit") or {}
-    image_issues = []
-    for img in (image_audit.get("images") or [])[:8]:
-        sem = img.get("semantic") or {}
-        detector = img.get("detector") or {}
-        if img.get("risk") == "local_warning" or sem.get("reasonability") in {"需人工核对", "可疑"} or (detector.get("score") or 0) >= 50:
-            image_issues.append({
-                "file": img.get("file"),
-                "local_issues": img.get("issues", []),
-                "semantic": _brief_text(sem.get("summary", ""), 360),
-                "detector_score": detector.get("score"),
-            })
+    image_issues = _report_action_image_issues(image_audit)
     resource_audit = (meta or {}).get("resource_audit") or {}
-    resource_issues = []
-    for issue in (resource_audit.get("issues") or [])[:8]:
-        resource_issues.append({
-            "index": issue.get("index"),
-            "url": issue.get("url"),
-            "type": issue.get("type"),
-            "status": issue.get("status"),
-            "problem": issue.get("problem"),
-        })
+    resource_issues = _report_action_resource_issues(resource_audit)
     return {
         "paper": str(pdf_path),
         "artifact_type": meta.get("artifact_type") or meta.get("report_type") or "complete",

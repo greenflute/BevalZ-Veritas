@@ -6829,6 +6829,57 @@ def test_report_action_reference_issues_clean_text_and_limit_results():
     assert issues[-1]["index"] == 7
 
 
+def test_report_action_image_issues_filter_risky_images_and_limit_results():
+    issues = veritas.report_action_context._report_action_image_issues(
+        {
+            "images": [
+                {"file": "clean.png", "risk": "ok", "semantic": {"reasonability": "合理", "summary": "clean"}, "detector": {"score": 10}},
+                {"file": "local.png", "risk": "local_warning", "issues": ["small"], "semantic": {"summary": "local warning"}, "detector": {}},
+                {"file": "semantic.png", "risk": "ok", "semantic": {"reasonability": "可疑", "summary": "semantic warning"}, "detector": {"score": 10}},
+                {"file": "detector.png", "risk": "ok", "semantic": {"summary": "detector warning"}, "detector": {"score": 50}},
+            ]
+            + [
+                {"file": f"extra-{idx}.png", "risk": "local_warning", "semantic": {"summary": f"extra {idx}"}, "detector": {}}
+                for idx in range(10)
+            ]
+        }
+    )
+
+    assert len(issues) == 7
+    assert [issue["file"] for issue in issues[:3]] == ["local.png", "semantic.png", "detector.png"]
+    assert issues[0]["local_issues"] == ["small"]
+    assert issues[1]["semantic"] == "semantic warning"
+    assert issues[2]["detector_score"] == 50
+    assert issues[-1]["file"] == "extra-3.png"
+
+
+def test_report_action_resource_issues_preserve_fields_and_limit_results():
+    issues = veritas.report_action_context._report_action_resource_issues(
+        {
+            "issues": [
+                {
+                    "index": idx,
+                    "url": f"https://example.test/{idx}",
+                    "type": "data",
+                    "status": "missing",
+                    "problem": "not found",
+                }
+                for idx in range(10)
+            ]
+        }
+    )
+
+    assert len(issues) == 8
+    assert issues[0] == {
+        "index": 0,
+        "url": "https://example.test/0",
+        "type": "data",
+        "status": "missing",
+        "problem": "not found",
+    }
+    assert issues[-1]["index"] == 7
+
+
 def test_report_action_context_cleans_reference_issue_text():
     context = paper_audit._report_action_context(
         {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"},
