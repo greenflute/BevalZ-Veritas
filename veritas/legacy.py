@@ -3621,6 +3621,43 @@ def _finalize_run_audit_result(input_path, args, report, meta, stat_result, refe
     return result_factory(artifact_paths, workspace=run_workspace, meta=meta)
 
 
+def _run_local_stat_stage(audit_text, resume_dir, completed_stages):
+    progress_bar(1, 5, "阶段2/5 开始本地统计检测")
+    print(f"🔢 正在执行本地统计检测...")
+    stat_result = local_stat_check(audit_text)
+    benford_str = f"{round(stat_result['benford_deviation'],3)}" if stat_result['benford_deviation'] else 'N/A'
+    print(f"✅ 统计检测完成: Benford偏差={benford_str}, p值异常={stat_result['p_value_abnormal']}, 数字数={stat_result['number_count']}")
+    resume_event(resume_dir, "stage2_stat", "done", f"numbers={stat_result['number_count']}; benford={benford_str}")
+    progress_bar(2, 5, "阶段2/5 本地统计检测完成")
+    completed_stages.append("stage2_stat_check")
+    return stat_result
+
+
+def _apply_image_risk_and_evidence_stages(input_path, output_dir, args, resume_dir, meta, full_text, extracted_file_texts, report, stat_result, completed_stages, retry_command):
+    image_audit = _run_image_audit_stage(input_path, output_dir, args, resume_dir, meta)
+    failed_capability, failed_message, failed_details = coverage_blocking_failure(meta)
+    if failed_capability:
+        return {"failure": AuditFailure(
+            capability=failed_capability,
+            error_class="provider_unavailable",
+            message=failed_message,
+            fix_hints=["检查第三方服务配置、网络情况和服务商状态后重试。"],
+            completed_stages=completed_stages,
+            retry_command=retry_command,
+            details=failed_details,
+        )}
+    report = apply_risk_rules(report, stat_result=stat_result, image_audit=meta.get("image_audit"))
+    meta["risk_rule_version"] = RISK_RULE_VERSION
+    meta["evidence_chain_audit"] = build_evidence_chain_audit(
+        full_text,
+        extracted_file_texts,
+        report,
+        meta,
+        stat_result,
+    )
+    return {"report": report, "image_audit": image_audit}
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3731,14 +3768,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     completed_stages.append("stage1_resource_audit")
 
     # ─── 阶段2：本地统计检测（使用全文，统计不截断） ───
-    progress_bar(1, 5, "阶段2/5 开始本地统计检测")
-    print(f"🔢 正在执行本地统计检测...")
-    stat_result = local_stat_check(audit_text)
-    benford_str = f"{round(stat_result['benford_deviation'],3)}" if stat_result['benford_deviation'] else 'N/A'
-    print(f"✅ 统计检测完成: Benford偏差={benford_str}, p值异常={stat_result['p_value_abnormal']}, 数字数={stat_result['number_count']}")
-    resume_event(resume_dir, "stage2_stat", "done", f"numbers={stat_result['number_count']}; benford={benford_str}")
-    progress_bar(2, 5, "阶段2/5 本地统计检测完成")
-    completed_stages.append("stage2_stat_check")
+    stat_result = _run_local_stat_stage(audit_text, resume_dir, completed_stages)
 
     # ─── 阶段3：智能分块 + LLM语义审查（冗余机制） ───
     print("🧪 关键能力预检: 文本语义审查LLM")
@@ -3780,28 +3810,22 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     report = llm_result["report"]
 
     # ─── 图像合理性检测：使用MinerU已保存zip中的图片/目录图片生成报告清单 ───
-    image_audit = _run_image_audit_stage(input_path, output_dir, args, resume_dir, meta)
-    failed_capability, failed_message, failed_details = coverage_blocking_failure(meta)
-    if failed_capability:
-        failure = AuditFailure(
-            capability=failed_capability,
-            error_class="provider_unavailable",
-            message=failed_message,
-            fix_hints=["检查第三方服务配置、网络情况和服务商状态后重试。"],
-            completed_stages=completed_stages,
-            retry_command=retry_command,
-            details=failed_details,
-        )
-        return _fail_run(failure, diagnostics_meta=meta)
-    report = apply_risk_rules(report, stat_result=stat_result, image_audit=meta.get("image_audit"))
-    meta["risk_rule_version"] = RISK_RULE_VERSION
-    meta["evidence_chain_audit"] = build_evidence_chain_audit(
+    image_stage = _apply_image_risk_and_evidence_stages(
+        input_path,
+        output_dir,
+        args,
+        resume_dir,
+        meta,
         full_text,
         extracted_file_texts,
         report,
-        meta,
         stat_result,
+        completed_stages,
+        retry_command,
     )
+    if image_stage.get("failure"):
+        return _fail_run(image_stage["failure"], diagnostics_meta=meta)
+    report = image_stage["report"]
 
     # ─── 阶段5：生成报告 ───
     return _finalize_run_audit_result(
