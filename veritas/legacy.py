@@ -160,6 +160,7 @@ from .runtime_metadata import ensure_runtime_meta, runtime_metadata, runtime_utc
 from . import run_logging as _run_logging
 from .run_logging import (
     _allow_llm_cache_read,
+    apply_llm_chunk_coverage_meta,
     detect_pdf_input,
     extract_cache_matches,
     extract_cache_payload,
@@ -183,6 +184,7 @@ from .run_logging import (
     save_stage1_extract_cache,
     setup_run_logging,
     stage1_extract_cache_state,
+    text_llm_stage_plan,
 )
 from .run_failures import save_failed_run_result
 from . import risk_rules as _risk_rules
@@ -3234,14 +3236,12 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         return failed_result
     completed_stages.append("text_llm_preflight")
 
-    chunk_size = min(int(args.max_chars), 4096)  # LLM单块硬上限4096字符
-    overlap = min(512, chunk_size // 8)  # 重叠区约12.5%，最多512字符
-
-    chunks = smart_chunk_text(audit_text, chunk_size=chunk_size, overlap=overlap)
-    total_chunks = len(chunks)
-    llm_cache_key = _text_fingerprint(audit_text, f"{LLM_API_URL}|{LLM_MODEL}|{chunk_size}|{overlap}|refs_excluded")
-    llm_cache_dir = resume_dir / f"llm_{llm_cache_key}"
-    llm_cache_dir.mkdir(parents=True, exist_ok=True)
+    llm_stage = text_llm_stage_plan(audit_text, args.max_chars, resume_dir, LLM_API_URL, LLM_MODEL, smart_chunk_text, _text_fingerprint)
+    chunk_size = llm_stage["chunk_size"]
+    overlap = llm_stage["overlap"]
+    chunks = llm_stage["chunks"]
+    total_chunks = llm_stage["total_chunks"]
+    llm_cache_dir = llm_stage["cache_dir"]
     resume_event(resume_dir, "stage3_llm", "start", f"chunks={total_chunks}; chunk_size={chunk_size}; overlap={overlap}", cache_dir=str(llm_cache_dir))
 
     progress_bar(2, 5, f"阶段3/5 开始LLM审查：{total_chunks}块")
@@ -3382,17 +3382,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
             else:
                 resume_event(resume_dir, "stage3_llm_retry", "done", "all failed chunks recovered")
 
-        successful_count = sum(1 for r in chunk_reports if r is not None and not r.get("parse_error"))
-        failed_final = []
-        for idx in range(total_chunks):
-            if chunk_reports[idx] is None or chunk_reports[idx].get("parse_error"):
-                failed_final.append(idx + 1)
-        meta["llm_success_chunks"] = successful_count
-        meta["llm_failed_chunks"] = failed_final
-        meta["llm_coverage"] = f"{successful_count}/{total_chunks}"
-        meta["llm_partial_report"] = bool(failed_final)
-
-        chunk_reports = [r for r in chunk_reports if r is not None and not r.get("parse_error")]
+        chunk_reports, failed_final = apply_llm_chunk_coverage_meta(meta, chunk_reports, total_chunks, chunk_size, overlap)
         if not chunk_reports:
             message = f"所有LLM分块均失败，无法生成语义审查报告。失败块: {failed_final}。"
             resume_event(resume_dir, "stage4_merge", "skipped_no_success", message)

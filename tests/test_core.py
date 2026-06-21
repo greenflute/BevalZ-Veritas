@@ -837,6 +837,71 @@ def test_run_cache_use_manifest_records_versions(tmp_path):
     }
 
 
+def test_text_llm_stage_plan_builds_chunking_and_cache_dir(tmp_path):
+    calls = {}
+
+    def fake_chunker(text, chunk_size, overlap):
+        calls["chunker"] = (text, chunk_size, overlap)
+        return [(text, 0, 0)]
+
+    def fake_fingerprint(text, salt):
+        calls["fingerprint"] = (text, salt)
+        return "abc123"
+
+    plan = paper_audit.text_llm_stage_plan(
+        "audit text",
+        max_chars=9000,
+        resume_dir=tmp_path,
+        llm_api_url="https://llm.example.test",
+        llm_model="model-x",
+        chunker=fake_chunker,
+        fingerprint_func=fake_fingerprint,
+    )
+
+    assert plan["chunk_size"] == 4096
+    assert plan["overlap"] == 512
+    assert plan["chunks"] == [("audit text", 0, 0)]
+    assert plan["total_chunks"] == 1
+    assert plan["cache_key"] == "abc123"
+    assert plan["cache_dir"] == tmp_path / "llm_abc123"
+    assert plan["cache_dir"].is_dir()
+    assert calls["chunker"] == ("audit text", 4096, 512)
+    assert calls["fingerprint"] == (
+        "audit text",
+        "https://llm.example.test|model-x|4096|512|refs_excluded",
+    )
+
+
+def test_apply_llm_chunk_coverage_meta_records_success_and_failures():
+    meta = {}
+    reports = [
+        {"summary": "ok-1"},
+        {"parse_error": True},
+        None,
+        {"summary": "ok-4"},
+    ]
+
+    successful, failed = paper_audit.apply_llm_chunk_coverage_meta(
+        meta,
+        reports,
+        total_chunks=4,
+        chunk_size=1024,
+        overlap=128,
+    )
+
+    assert successful == [{"summary": "ok-1"}, {"summary": "ok-4"}]
+    assert failed == [2, 3]
+    assert meta == {
+        "llm_success_chunks": 2,
+        "llm_failed_chunks": [2, 3],
+        "llm_coverage": "2/4",
+        "llm_partial_report": True,
+        "chunk_count": 4,
+        "chunk_size": 1024,
+        "overlap": 128,
+    }
+
+
 def test_llm_success_cache_payload_preserves_single_and_chunk_shapes():
     single = paper_audit.llm_success_cache_payload(
         {"risk_level": "低"},
@@ -1557,6 +1622,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.extract_cache_payload is paper_audit.extract_cache_payload
     assert veritas.run_logging.save_stage1_extract_cache is paper_audit.save_stage1_extract_cache
     assert veritas.run_logging.run_cache_use_manifest is paper_audit.run_cache_use_manifest
+    assert veritas.run_logging.text_llm_stage_plan is paper_audit.text_llm_stage_plan
+    assert veritas.run_logging.apply_llm_chunk_coverage_meta is paper_audit.apply_llm_chunk_coverage_meta
     assert veritas.run_logging.llm_success_cache_payload is paper_audit.llm_success_cache_payload
     assert veritas.run_logging.llm_failure_cache_payload is paper_audit.llm_failure_cache_payload
     assert veritas.run_logging.online_cache_state is paper_audit.online_cache_state

@@ -19,6 +19,8 @@ __all__ = [
     "extract_cache_payload",
     "save_stage1_extract_cache",
     "run_cache_use_manifest",
+    "text_llm_stage_plan",
+    "apply_llm_chunk_coverage_meta",
     "llm_success_cache_payload",
     "llm_failure_cache_payload",
     "online_cache_state",
@@ -235,6 +237,44 @@ def run_cache_use_manifest(
         "extract_cache_version": extract_cache_version,
         "image_semantic_cache_version": image_semantic_cache_version,
     }
+
+
+def text_llm_stage_plan(audit_text, max_chars, resume_dir, llm_api_url, llm_model, chunker, fingerprint_func):
+    """Build text-LLM chunking and cache-dir state for a run."""
+    chunk_size = min(int(max_chars), 4096)
+    overlap = min(512, chunk_size // 8)
+    chunks = chunker(audit_text, chunk_size=chunk_size, overlap=overlap)
+    total_chunks = len(chunks)
+    cache_key = fingerprint_func(audit_text, f"{llm_api_url}|{llm_model}|{chunk_size}|{overlap}|refs_excluded")
+    cache_dir = Path(resume_dir) / f"llm_{cache_key}"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "chunk_size": chunk_size,
+        "overlap": overlap,
+        "chunks": chunks,
+        "total_chunks": total_chunks,
+        "cache_key": cache_key,
+        "cache_dir": cache_dir,
+    }
+
+
+def apply_llm_chunk_coverage_meta(meta, chunk_reports, total_chunks, chunk_size, overlap):
+    """Update run meta with text-LLM chunk coverage and return successful reports."""
+    successful_count = sum(1 for report in chunk_reports if report is not None and not report.get("parse_error"))
+    failed_final = []
+    for idx in range(total_chunks):
+        report = chunk_reports[idx] if idx < len(chunk_reports) else None
+        if report is None or report.get("parse_error"):
+            failed_final.append(idx + 1)
+    meta["llm_success_chunks"] = successful_count
+    meta["llm_failed_chunks"] = failed_final
+    meta["llm_coverage"] = f"{successful_count}/{total_chunks}"
+    meta["llm_partial_report"] = bool(failed_final)
+    meta["chunk_count"] = total_chunks
+    meta["chunk_size"] = chunk_size
+    meta["overlap"] = overlap
+    successful_reports = [report for report in chunk_reports if report is not None and not report.get("parse_error")]
+    return successful_reports, failed_final
 
 
 def llm_success_cache_payload(report, raw_content, timestamp_func=None, chunk_index=None, total_chunks=None, retry=None):
