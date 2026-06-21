@@ -39,6 +39,7 @@ veritas/
 ├── preflight.py        # Critical capability preflight boundary
 ├── project_files.py    # Project file discovery and run metadata helpers
 ├── reference_parsing.py # Reference section parsing and query-building helpers
+├── reference_reporting.py # Reference audit Markdown/HTML rendering helpers
 ├── renderers.py        # Markdown/HTML renderer boundary
 ├── risk_rule_helpers.py # Shared risk scoring/merge helpers for rules/rendering
 ├── risk_rules.py       # Versioned final risk scoring boundary
@@ -155,6 +156,9 @@ tests/
   author similarity, and reference query/cache-key construction. Crossref,
   OpenAlex, PubMed, and official-site network lookups remain outside this
   boundary.
+- `veritas/reference_reporting.py` owns deterministic reference audit issue
+  labels, online summary text, Markdown tables, and HTML cards. Reference
+  parsing and online lookup remain outside this boundary.
 - `veritas/followups.py` owns PubPeer/comment and journal-letter language,
   tone, article-identity, issue-normalization, context-building, prompt
   construction, draft artifact load/save, and namespace-aware generation

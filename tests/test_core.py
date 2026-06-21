@@ -818,6 +818,9 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.reference_parsing.extract_reference_year_hint is paper_audit.extract_reference_year_hint
     assert veritas.reference_parsing.build_reference_query is paper_audit.build_reference_query
     assert veritas.reference_parsing.reference_cache_key is paper_audit.reference_cache_key
+    assert veritas.reference_reporting._reference_issue_text is paper_audit._reference_issue_text
+    assert veritas.reference_reporting.format_reference_audit_html is paper_audit.format_reference_audit_html
+    assert veritas.reference_reporting.format_reference_audit_markdown is paper_audit.format_reference_audit_markdown
     assert veritas.followups.normalize_followup_language is paper_audit.normalize_followup_language
     assert veritas.followups.normalize_followup_tone is paper_audit.normalize_followup_tone
     assert veritas.followups.normalize_article_identity is paper_audit.normalize_article_identity
