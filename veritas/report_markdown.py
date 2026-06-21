@@ -111,6 +111,24 @@ def _markdown_report_summary_lines(report, risk_icons):
     return lines
 
 
+def _markdown_suspicious_finding_row(
+    index,
+    check,
+    md_escape,
+    check_source_tags,
+    check_source_text,
+    check_reason,
+    brief_text,
+):
+    cat_item = f"{check.get('category', 'N/A')} / {check.get('item', 'N/A')}"
+    return (
+        f"| {index} | {md_escape(check.get('verdict', 'N/A'))} | {md_escape(' + '.join(check_source_tags(check)))} | "
+        f"{md_escape(cat_item)} | "
+        f"{md_escape(brief_text(check_source_text(check), 220) or '未提供明确原文摘录')} | "
+        f"{md_escape(brief_text(check_reason(check), 220) or '未提供详细原因')} |"
+    )
+
+
 def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result):
     """Format the audit result as a Markdown report."""
     normalize_meta = _namespace_value(namespace, "normalize_run_meta", normalize_run_meta)
@@ -172,11 +190,16 @@ def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result)
             lines.append("| # | 判定 | 来源类型 | 分类/检查项 | 原文证据摘录 | 可疑原因 |")
             lines.append("|---|------|----------|-------------|--------------|----------|")
             for i, c in enumerate(suspicious[:5], 1):
-                cat_item = f"{c.get('category', 'N/A')} / {c.get('item', 'N/A')}"
                 lines.append(
-                    f"| {i} | {md_escape(c.get('verdict', 'N/A'))} | {md_escape(' + '.join(check_source_tags(c)))} | {md_escape(cat_item)} | "
-                    f"{md_escape(brief_text(check_source_text(c), 220) or '未提供明确原文摘录')} | "
-                    f"{md_escape(brief_text(check_reason(c), 220) or '未提供详细原因')} |"
+                    _markdown_suspicious_finding_row(
+                        i,
+                        c,
+                        md_escape,
+                        check_source_tags,
+                        check_source_text,
+                        check_reason,
+                        brief_text,
+                    )
                 )
             if len(suspicious) > 5:
                 lines.append("")

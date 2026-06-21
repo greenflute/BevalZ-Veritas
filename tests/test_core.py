@@ -4799,6 +4799,23 @@ def test_markdown_report_summary_lines_include_risk_icon_and_breakdown():
     assert "红旗 1；证据型疑点 2；提取质量疑点 3；统计调整 p值异常" in joined
 
 
+def test_markdown_suspicious_finding_row_escapes_cells_and_uses_callbacks():
+    row = veritas.report_markdown._markdown_suspicious_finding_row(
+        2,
+        {"category": "数据|结果", "item": "样本量", "verdict": "🚩红旗", "source_text": "Methods n=42", "reason": "Mismatch | risk"},
+        paper_audit._md_escape_cell,
+        lambda check: ["LLM", "统计"],
+        lambda check: check.get("source_text", ""),
+        lambda check: check.get("reason", ""),
+        paper_audit._brief_text,
+    )
+
+    assert row.startswith("| 2 | 🚩红旗 | LLM + 统计 |")
+    assert "数据\\|结果 / 样本量" in row
+    assert "Methods n=42" in row
+    assert "Mismatch \\| risk" in row
+
+
 def test_reports_include_review_overview_and_internal_evidence_links(tmp_path):
     stat = {
         "benford_deviation": None,
