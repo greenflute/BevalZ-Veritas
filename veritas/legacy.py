@@ -390,6 +390,7 @@ from .web_runner import (
     dropped_local_path_from_uri_text,
     pick_local_path,
     web_runner_page_body_markup,
+    web_runner_page_head_markup,
     web_runner_page_styles,
     render_web_runner_page,
     web_runner_config_status_from_namespace,

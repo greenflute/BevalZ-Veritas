@@ -373,7 +373,9 @@ def web_runner_page_body_markup():
 """
 
 
-def render_web_runner_page():
+def web_runner_page_head_markup(styles=None):
+    """Return the document head markup for the local Web Runner page."""
+    styles = web_runner_page_styles() if styles is None else styles
     return """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -381,10 +383,14 @@ def render_web_runner_page():
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Veritas Web Runner</title>
 <style>
-""" + web_runner_page_styles() + """
+""" + styles + """
 </style>
 </head>
-""" + web_runner_page_body_markup() + """
+"""
+
+
+def render_web_runner_page():
+    return web_runner_page_head_markup() + web_runner_page_body_markup() + """
 <script>
 const $ = (id) => document.getElementById(id);
 let activeRunId = null;
@@ -747,6 +753,7 @@ __all__ = [
     "dropped_local_path_from_uri_text",
     "web_runner_page_styles",
     "web_runner_page_body_markup",
+    "web_runner_page_head_markup",
     "render_web_runner_page",
     "web_runner_cors_headers",
 ]
