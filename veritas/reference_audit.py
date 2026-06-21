@@ -34,6 +34,16 @@ def _reference_base_issues(ref, current_year):
     return ref_issues
 
 
+def _reference_online_skipped_result(ref, query_for):
+    return {
+        "online_status": "skipped",
+        "confidence": 0.0,
+        "problems": ["online_limit_reached"],
+        "matched_sources": [],
+        "query": query_for(ref),
+    }
+
+
 def audit_references_from_namespace(namespace, references_text, online=False, online_limit=50, timeout=10, cache=None):
     """Reference plausibility check with optional online scholarly database verification."""
     parse = _namespace_value(namespace, "parse_references", parse_references)
@@ -60,13 +70,7 @@ def audit_references_from_namespace(namespace, references_text, online=False, on
                 else:
                     fetch_jobs.append((idx, ref, cache_key))
             else:
-                ref["online"] = {
-                    "online_status": "skipped",
-                    "confidence": 0.0,
-                    "problems": ["online_limit_reached"],
-                    "matched_sources": [],
-                    "query": query_for(ref),
-                }
+                ref["online"] = _reference_online_skipped_result(ref, query_for)
 
         if fetch_jobs:
             workers = min(4, len(fetch_jobs))

@@ -2647,6 +2647,21 @@ def test_reference_base_issues_uses_runtime_year_and_required_fields():
     ) == []
 
 
+def test_reference_online_skipped_result_contains_limit_problem_and_query():
+    result = veritas.reference_audit._reference_online_skipped_result(
+        {"title": "A reference"},
+        lambda ref: {"title": ref["title"]},
+    )
+
+    assert result == {
+        "online_status": "skipped",
+        "confidence": 0.0,
+        "problems": ["online_limit_reached"],
+        "matched_sources": [],
+        "query": {"title": "A reference"},
+    }
+
+
 def test_parse_references_strips_mineru_markup():
     refs = """[[EXTRACTION_NOTE]] noise [[/EXTRACTION_NOTE]]
 [[BLOCK type=text page=1]]
