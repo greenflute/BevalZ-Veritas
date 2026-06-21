@@ -1127,6 +1127,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert callable(veritas.reference_online.lookup_pubmed_reference_from_namespace)
     assert callable(veritas.reference_online.lookup_official_site_reference_from_namespace)
     assert veritas.reference_parsing.split_references_from_text is paper_audit.split_references_from_text
+    assert veritas.reference_parsing.split_audit_and_reference_text is paper_audit.split_audit_and_reference_text
     assert veritas.reference_parsing.parse_references is paper_audit.parse_references
     assert veritas.reference_parsing.extract_reference_title is paper_audit.extract_reference_title
     assert veritas.reference_parsing.extract_reference_year_hint is paper_audit.extract_reference_year_hint
@@ -1878,6 +1879,31 @@ def test_split_references_from_text_removes_reference_tail():
     assert "Body with n=20" in main_text
     assert "Smith J" not in main_text
     assert "Smith J" in refs
+
+
+def test_split_audit_and_reference_text_merges_reference_file_text_and_cleans_meta():
+    meta = {
+        "total_chars": 10,
+        "reference_file_text": "[2] Separate Reference File. Journal. 2021.",
+    }
+    text = "Title\nMethods\nResults\n\nReferences\n[1] Inline Reference. Journal. 2020."
+
+    audit_text, refs = paper_audit.split_audit_and_reference_text(text, meta)
+
+    assert audit_text == "Title\nMethods\nResults"
+    assert "[1] Inline Reference" in refs
+    assert "[2] Separate Reference File" in refs
+    assert meta == {"total_chars": 10}
+
+
+def test_split_audit_and_reference_text_uses_reference_file_text_without_inline_section():
+    meta = {"reference_file_text": "[1] Separate Reference File. Journal. 2021."}
+
+    audit_text, refs = paper_audit.split_audit_and_reference_text("Title\nBody", meta)
+
+    assert audit_text == "Title\nBody"
+    assert refs == "[1] Separate Reference File. Journal. 2021."
+    assert "reference_file_text" not in meta
 
 
 def test_split_references_from_text_handles_mineru_singular_reference_heading():

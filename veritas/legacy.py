@@ -251,6 +251,7 @@ from .reference_parsing import (
     extract_reference_year_hint,
     parse_references,
     reference_cache_key,
+    split_audit_and_reference_text,
     split_references_from_text,
 )
 from .reference_audit import audit_references_from_namespace
@@ -4557,10 +4558,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         print("ℹ️ --image-detect 已改为兼容参数；图片检测将在阶段4自动调用图像语义分析与imagedetector子工具，不会打开网页或要求手动上传。")
 
     # ─── 参考文献剥离与单独校检 ───
-    audit_text, references_text = split_references_from_text(full_text)
-    reference_file_text = meta.pop("reference_file_text", "")
-    if reference_file_text:
-        references_text = (references_text + "\n\n" + reference_file_text).strip()
+    audit_text, references_text = split_audit_and_reference_text(full_text, meta)
     reference_online_cache_path = resume_dir / "reference_online_cache.json"
     reference_online_enabled = bool(references_text) and not args.no_reference_online
     reference_online_cache = {} if args.no_resume else (_json_load(reference_online_cache_path, {}) or {})

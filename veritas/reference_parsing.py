@@ -11,6 +11,7 @@ __all__ = [
     "REFERENCE_CONTAINER_WORD_RE",
     "REFERENCE_OFFICIAL_SITE_RULES",
     "split_references_from_text",
+    "split_audit_and_reference_text",
     "parse_references",
     "_truncate_reference_suffix",
     "_reference_items_from_numbered_lines",
@@ -53,6 +54,17 @@ def split_references_from_text(text):
     main_text = text[:start].rstrip()
     references_text = text[start:].strip()
     return main_text, references_text
+
+
+def split_audit_and_reference_text(full_text, meta):
+    """Split audit body text and merge directory reference-file text from run meta."""
+    audit_text, references_text = split_references_from_text(full_text)
+    reference_file_text = ""
+    if isinstance(meta, dict):
+        reference_file_text = meta.pop("reference_file_text", "") or ""
+    if reference_file_text:
+        references_text = (references_text + "\n\n" + str(reference_file_text)).strip()
+    return audit_text, references_text
 
 
 def parse_references(references_text):
