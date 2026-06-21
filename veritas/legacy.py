@@ -394,6 +394,7 @@ from .web_runner import (
     web_runner_page_head_markup,
     web_runner_page_input_script,
     web_runner_page_path_script,
+    web_runner_page_report_script,
     web_runner_page_script_markup,
     web_runner_page_styles,
     render_web_runner_page,
