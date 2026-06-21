@@ -786,6 +786,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.mineru_text._format_mineru_content_list is paper_audit._format_mineru_content_list
     assert veritas.mineru_text._normalize_mineru_table_text is paper_audit._normalize_mineru_table_text
     assert veritas.paper_identity.extract_paper_identity is paper_audit.extract_paper_identity
+    assert callable(veritas.image_cache._image_file_fingerprint_from_namespace)
+    assert callable(veritas.image_cache._image_semantic_cache_key_from_namespace)
     assert veritas.text_utils._brief_text is paper_audit._brief_text
     assert veritas.text_utils._normalize_title is paper_audit._normalize_title
     assert veritas.text_utils._title_tokens is paper_audit._title_tokens

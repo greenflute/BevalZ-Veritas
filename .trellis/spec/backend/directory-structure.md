@@ -28,6 +28,7 @@ veritas/
 ├── failed_diagnostics.py # Stable failed-audit payload and conversion helpers
 ├── followups.py       # PubPeer/comment and journal-letter draft workflow helpers
 ├── html_utils.py       # HTML escaping and script-safe JSON helpers
+├── image_cache.py      # Image audit cache key and fingerprint helpers
 ├── local_analysis.py   # Local statistics and text chunking helpers
 ├── mineru_text.py      # MinerU structured content-list text formatting helpers
 ├── models.py           # Stable dataclass/report models and model conversion
@@ -109,6 +110,10 @@ tests/
 - `veritas/html_utils.py` owns HTML escaping and script-safe JSON helpers used
   by renderers; these remain re-exported through `paper_audit` for
   compatibility while renderer extraction continues.
+- `veritas/image_cache.py` owns deterministic image file fingerprints and image
+  semantic cache key construction. Namespace-aware helpers let `veritas.legacy`
+  preserve historical monkeypatch behavior for image semantic endpoint, model,
+  and cache-version globals.
 - `veritas/evidence_rendering.py` owns deterministic evidence excerpt cleanup,
   MinerU table marker removal, Markdown/HTML table parsing, data-table HTML
   rendering, and compact evidence summary HTML. It must remain provider-free

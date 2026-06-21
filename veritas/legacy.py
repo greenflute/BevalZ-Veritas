@@ -59,6 +59,7 @@ from .followups import (
     save_followup_artifacts_from_namespace,
 )
 from .html_utils import _html_escape, _json_for_script_tag
+from .image_cache import _image_file_fingerprint_from_namespace, _image_semantic_cache_key_from_namespace
 from .local_analysis import benford_analysis, extract_all_numbers, local_stat_check, smart_chunk_text
 from .config import (
     CapabilityConfig,
@@ -7966,20 +7967,17 @@ def analyze_image_reasonability(image_path: str):
 
 
 def _image_file_fingerprint(image_path: str):
-    try:
-        path = Path(image_path)
-        stat = path.stat()
-        return _text_fingerprint(str(path.resolve()), f"{stat.st_size}|{int(stat.st_mtime)}|semantic_v{IMAGE_SEMANTIC_CACHE_VERSION}")
-    except Exception:
-        return _text_fingerprint(str(image_path), f"semantic_v{IMAGE_SEMANTIC_CACHE_VERSION}")
+    return _image_file_fingerprint_from_namespace(globals(), image_path)
 
 
 def _image_semantic_cache_key(image_path: str, api_url=None, model=None, cache_version=None):
-    version = IMAGE_SEMANTIC_CACHE_VERSION if cache_version is None else cache_version
-    endpoint = _chat_completions_endpoint(api_url or GLM_API_URL)
-    selected_model = model or GLM_VISION_MODEL
-    service_fingerprint = _text_fingerprint(endpoint, f"{selected_model}|image_semantic_v{version}")
-    return f"{_image_file_fingerprint(image_path)}:image_semantic:{service_fingerprint}"
+    return _image_semantic_cache_key_from_namespace(
+        globals(),
+        image_path,
+        api_url=api_url,
+        model=model,
+        cache_version=cache_version,
+    )
 
 
 def _image_to_data_url(image_path: str):
