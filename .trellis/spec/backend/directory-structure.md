@@ -360,8 +360,8 @@ tests/
 - `veritas/run_logging.py` owns local run-output helpers: output base
   selection, tee logging, resume event JSONL writes, progress printing, LLM
   cache-read policy, extraction-cache matching/state normalization/payload
-  construction, online-check cache path/state/save-event construction,
-  image-audit cache path/state/save-callback construction, run-summary
+  construction/save-event recording, online-check cache path/state/save-event
+  construction, image-audit cache path/state/save-callback construction, run-summary
   input/route/scope helpers, workspace input and cache-use manifest
   construction, preflight workspace/resume-event recording, and saved MinerU
   URL/ZIP artifacts. It should stay filesystem-local and must not call

@@ -178,6 +178,7 @@ from .run_logging import (
     run_scope_flags_from_args,
     save_mineru_artifacts,
     save_online_cache_result,
+    save_stage1_extract_cache,
     setup_run_logging,
     stage1_extract_cache_state,
 )
@@ -4542,19 +4543,19 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     completed_stages.append("stage1_text_extraction")
 
     if not args.no_resume and full_text:
-        _json_save(
+        save_stage1_extract_cache(
             extract_cache_path,
-            extract_cache_payload(
-                input_path,
-                EXTRACT_CACHE_VERSION,
-                use_mineru,
-                args.mineru_lang,
-                full_text,
-                meta,
-                extracted_file_texts,
-            ),
+            input_path,
+            EXTRACT_CACHE_VERSION,
+            use_mineru,
+            args.mineru_lang,
+            full_text,
+            meta,
+            extracted_file_texts,
+            _json_save,
+            resume_event,
+            resume_dir,
         )
-        resume_event(resume_dir, "stage1_extract", "saved", f"chars={len(full_text)}; use_mineru={use_mineru}", cache=str(extract_cache_path))
 
     # ─── 朱雀AI文本检测（可选） ───
     if args.ai_detect:

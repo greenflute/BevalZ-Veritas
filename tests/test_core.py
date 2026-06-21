@@ -760,6 +760,47 @@ def test_extract_cache_payload_records_stage1_cache_fields(tmp_path):
     }
 
 
+def test_save_stage1_extract_cache_persists_payload_and_records_event(tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("pdf", encoding="utf-8")
+    resume_dir = tmp_path / ".paper_audit_resume"
+    cache_path = resume_dir / "stage1_extract.json"
+    events = []
+
+    def fake_resume_event(resume_path, step, status, detail, **extra):
+        events.append((resume_path, step, status, detail, extra))
+
+    paper_audit.save_stage1_extract_cache(
+        cache_path,
+        input_path,
+        cache_version=7,
+        use_mineru=True,
+        mineru_lang="ch",
+        full_text="abc",
+        meta={"total_chars": 3},
+        file_texts=[{"file": "paper.pdf", "text": "abc"}],
+        json_save=paper_audit._json_save,
+        resume_event_func=fake_resume_event,
+        resume_dir=resume_dir,
+        timestamp_func=lambda: "2026-06-21 10:00:00",
+    )
+
+    payload = paper_audit._json_load(cache_path)
+    assert payload["input"] == str(input_path.resolve())
+    assert payload["cache_version"] == 7
+    assert payload["use_mineru"] is True
+    assert payload["mineru_lang"] == "ch"
+    assert payload["full_text"] == "abc"
+    assert payload["saved_at"] == "2026-06-21 10:00:00"
+    assert events == [(
+        resume_dir,
+        "stage1_extract",
+        "saved",
+        "chars=3; use_mineru=True",
+        {"cache": str(cache_path)},
+    )]
+
+
 def test_run_input_manifest_records_local_file_state(tmp_path):
     input_path = tmp_path / "paper.txt"
     input_path.write_text("abc", encoding="utf-8")
@@ -1461,6 +1502,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.extract_cache_matches is paper_audit.extract_cache_matches
     assert veritas.run_logging.stage1_extract_cache_state is paper_audit.stage1_extract_cache_state
     assert veritas.run_logging.extract_cache_payload is paper_audit.extract_cache_payload
+    assert veritas.run_logging.save_stage1_extract_cache is paper_audit.save_stage1_extract_cache
     assert veritas.run_logging.run_cache_use_manifest is paper_audit.run_cache_use_manifest
     assert veritas.run_logging.online_cache_state is paper_audit.online_cache_state
     assert veritas.run_logging.save_online_cache_result is paper_audit.save_online_cache_result

@@ -17,6 +17,7 @@ __all__ = [
     "extract_cache_matches",
     "stage1_extract_cache_state",
     "extract_cache_payload",
+    "save_stage1_extract_cache",
     "run_cache_use_manifest",
     "online_cache_state",
     "save_online_cache_result",
@@ -162,6 +163,43 @@ def extract_cache_payload(
         "file_texts": file_texts,
         "saved_at": timestamp(),
     }
+
+
+def save_stage1_extract_cache(
+    extract_cache_path,
+    input_path,
+    cache_version,
+    use_mineru,
+    mineru_lang,
+    full_text,
+    meta,
+    file_texts,
+    json_save,
+    resume_event_func,
+    resume_dir,
+    timestamp_func=None,
+):
+    """Persist the stage-1 extraction cache and record its resume event."""
+    json_save(
+        extract_cache_path,
+        extract_cache_payload(
+            input_path,
+            cache_version,
+            use_mineru,
+            mineru_lang,
+            full_text,
+            meta,
+            file_texts,
+            timestamp_func=timestamp_func,
+        ),
+    )
+    resume_event_func(
+        resume_dir,
+        "stage1_extract",
+        "saved",
+        f"chars={len(full_text)}; use_mineru={use_mineru}",
+        cache=str(extract_cache_path),
+    )
 
 
 def run_input_manifest(input_path, runtime):
