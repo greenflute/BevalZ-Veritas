@@ -3511,6 +3511,76 @@ def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_rea
     return merge_result
 
 
+def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default, completed_stages, retry_command, resume_dir, run_runtime, preflight_results):
+    extract_cache_path = resume_dir / "stage1_extract.json"
+    cached_extract = None if args.no_resume else _json_load(extract_cache_path)
+    extracted_file_texts = []
+    cache_state = stage1_extract_cache_state(cached_extract, input_path, use_mineru_default, EXTRACT_CACHE_VERSION)
+    if cache_state:
+        full_text = cache_state["full_text"]
+        meta = cache_state["meta"]
+        extracted_file_texts = cache_state["file_texts"]
+        raw_pdf = cache_state["raw_pdf"]
+        use_mineru = cache_state["use_mineru"]
+        print(f"🔁 断点续作：复用阶段1文本缓存 {extract_cache_path} ({len(full_text)}字符)")
+        resume_event(resume_dir, "stage1_extract", "cache_hit", f"chars={len(full_text)}", cache=str(extract_cache_path))
+        progress_bar(1, 5, "阶段1/5 文本提取缓存命中")
+    else:
+        full_text = None
+        meta = {}
+        raw_pdf = None
+        use_mineru = use_mineru_default
+
+    if full_text is None and input_path.is_dir():
+        directory_result = _extract_directory_input(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
+        if directory_result.get("failure"):
+            return {
+                "failure": directory_result["failure"],
+                "diagnostics_meta": {"runtime": run_runtime, "preflight_results": preflight_results},
+            }
+        full_text = directory_result["full_text"]
+        meta = directory_result["meta"]
+        extracted_file_texts = directory_result["extracted_file_texts"]
+    elif full_text is None:
+        single_result = _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
+        if single_result.get("failure"):
+            return {"failure": single_result["failure"]}
+        full_text = single_result["full_text"]
+        meta = single_result["meta"]
+        raw_pdf = single_result["raw_pdf"]
+        use_mineru = single_result["use_mineru"]
+        extracted_file_texts = single_result["extracted_file_texts"]
+
+    meta = normalize_run_meta(meta, input_path, full_text)
+    meta["runtime"] = run_runtime
+    meta["paper_identity"] = extract_paper_identity(full_text, input_path)
+    meta["preflight_results"] = preflight_results
+    meta["cross_file_consistency_audit"] = build_cross_file_consistency_audit(extracted_file_texts, root_path=input_path)
+    completed_stages.append("stage1_text_extraction")
+
+    if not args.no_resume and full_text:
+        save_stage1_extract_cache(
+            extract_cache_path,
+            input_path,
+            EXTRACT_CACHE_VERSION,
+            use_mineru,
+            args.mineru_lang,
+            full_text,
+            meta,
+            extracted_file_texts,
+            _json_save,
+            resume_event,
+            resume_dir,
+        )
+    return {
+        "full_text": full_text,
+        "meta": meta,
+        "raw_pdf": raw_pdf,
+        "use_mineru": use_mineru,
+        "extracted_file_texts": extracted_file_texts,
+    }
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3590,66 +3660,22 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     progress_bar(0, 5, "初始化完成")
 
     # ─── 阶段1：文本提取（支持单个文件/整个论文目录） ───
-    extract_cache_path = resume_dir / "stage1_extract.json"
-    cached_extract = None if args.no_resume else _json_load(extract_cache_path)
-    extracted_file_texts = []
-    cache_state = stage1_extract_cache_state(cached_extract, input_path, use_mineru_default, EXTRACT_CACHE_VERSION)
-    if cache_state:
-        full_text = cache_state["full_text"]
-        meta = cache_state["meta"]
-        extracted_file_texts = cache_state["file_texts"]
-        raw_pdf = cache_state["raw_pdf"]
-        use_mineru = cache_state["use_mineru"]
-        print(f"🔁 断点续作：复用阶段1文本缓存 {extract_cache_path} ({len(full_text)}字符)")
-        resume_event(resume_dir, "stage1_extract", "cache_hit", f"chars={len(full_text)}", cache=str(extract_cache_path))
-        progress_bar(1, 5, "阶段1/5 文本提取缓存命中")
-    else:
-        full_text = None
-        meta = {}
-        raw_pdf = None
-        use_mineru = use_mineru_default
-
-    if full_text is None and input_path.is_dir():
-        directory_result = _extract_directory_input(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
-        if directory_result.get("failure"):
-            return _fail_run(
-                directory_result["failure"],
-                diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
-            )
-        full_text = directory_result["full_text"]
-        meta = directory_result["meta"]
-        extracted_file_texts = directory_result["extracted_file_texts"]
-    elif full_text is None:
-        single_result = _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
-        if single_result.get("failure"):
-            return _fail_run(single_result["failure"])
-        full_text = single_result["full_text"]
-        meta = single_result["meta"]
-        raw_pdf = single_result["raw_pdf"]
-        use_mineru = single_result["use_mineru"]
-        extracted_file_texts = single_result["extracted_file_texts"]
-
-    meta = normalize_run_meta(meta, input_path, full_text)
-    meta["runtime"] = run_runtime
-    meta["paper_identity"] = extract_paper_identity(full_text, input_path)
-    meta["preflight_results"] = preflight_results
-    meta["cross_file_consistency_audit"] = build_cross_file_consistency_audit(extracted_file_texts, root_path=input_path)
-    completed_stages.append("stage1_text_extraction")
-
-    if not args.no_resume and full_text:
-        save_stage1_extract_cache(
-            extract_cache_path,
-            input_path,
-            EXTRACT_CACHE_VERSION,
-            use_mineru,
-            args.mineru_lang,
-            full_text,
-            meta,
-            extracted_file_texts,
-            _json_save,
-            resume_event,
-            resume_dir,
-        )
+    stage1_result = _run_stage1_text_extraction(
+        input_path,
+        args,
+        output_dir,
+        use_mineru_default,
+        completed_stages,
+        retry_command,
+        resume_dir,
+        run_runtime,
+        preflight_results,
+    )
+    if stage1_result.get("failure"):
+        return _fail_run(stage1_result["failure"], diagnostics_meta=stage1_result.get("diagnostics_meta"))
+    full_text = stage1_result["full_text"]
+    meta = stage1_result["meta"]
+    extracted_file_texts = stage1_result["extracted_file_texts"]
 
     # ─── 朱雀AI文本检测（可选） ───
     if args.ai_detect:
