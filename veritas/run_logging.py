@@ -26,6 +26,7 @@ __all__ = [
     "llm_chunk_cache_read_state",
     "apply_llm_partial_report_warning",
     "save_llm_failure_cache_result",
+    "llm_retry_failure_summary",
     "online_cache_state",
     "save_online_cache_result",
     "image_audit_cache_state",
@@ -402,6 +403,18 @@ def save_llm_failure_cache_result(
         f"chunk={chunk_idx+1}/{total_chunks}; error={error}",
         cache=str(chunk_cache),
     )
+
+
+def llm_retry_failure_summary(still_failed, strict_failed_chunks):
+    """Build summary fields for text-LLM chunks that still failed after retry."""
+    failed_nums = [idx + 1 for idx, _ in still_failed]
+    detail = "; ".join([f"第{idx+1}块: {err}" for idx, err in still_failed])
+    return {
+        "failed_chunks": failed_nums,
+        "detail": detail,
+        "event_detail": f"still_failed={failed_nums}; strict={strict_failed_chunks}",
+        "message": "LLM分块重试后仍失败，停止生成完整审查报告: " + detail,
+    }
 
 
 def online_cache_state(resume_dir, filename, no_resume, json_load):

@@ -172,6 +172,7 @@ from .run_logging import (
     image_semantic_cache_save_callback,
     llm_chunk_cache_read_state,
     llm_failure_cache_payload,
+    llm_retry_failure_summary,
     llm_success_cache_payload,
     online_cache_state,
     progress_bar,
@@ -3384,17 +3385,16 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                                 first_error=first_error,
                             )
             if still_failed:
-                failed_nums = [idx + 1 for idx, _ in still_failed]
-                detail = "; ".join([f"第{idx+1}块: {err}" for idx, err in still_failed])
-                resume_event(resume_dir, "stage3_llm_retry", "still_failed", f"still_failed={failed_nums}; strict={args.strict_failed_chunks}")
+                failure_summary = llm_retry_failure_summary(still_failed, args.strict_failed_chunks)
+                resume_event(resume_dir, "stage3_llm_retry", "still_failed", failure_summary["event_detail"])
                 failure = AuditFailure(
                     capability="text_llm",
                     error_class="schema_error",
-                    message="LLM分块重试后仍失败，停止生成完整审查报告: " + detail,
+                    message=failure_summary["message"],
                     fix_hints=["检查文本LLM服务稳定性和严格证据schema输出。", "更换稳定服务或稍后重试。"],
                     completed_stages=completed_stages,
                     retry_command=retry_command,
-                    details={"failed_chunks": failed_nums, "detail": detail},
+                    details={"failed_chunks": failure_summary["failed_chunks"], "detail": failure_summary["detail"]},
                 )
                 return save_failed_run_result(
                     failure,

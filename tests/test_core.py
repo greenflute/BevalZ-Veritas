@@ -1119,6 +1119,20 @@ def test_save_llm_failure_cache_result_persists_payload_and_event(tmp_path):
     ]
 
 
+def test_llm_retry_failure_summary_builds_user_facing_details():
+    summary = paper_audit.llm_retry_failure_summary(
+        [(0, "timeout"), (2, "schema bad")],
+        strict_failed_chunks=True,
+    )
+
+    assert summary == {
+        "failed_chunks": [1, 3],
+        "detail": "第1块: timeout; 第3块: schema bad",
+        "event_detail": "still_failed=[1, 3]; strict=True",
+        "message": "LLM分块重试后仍失败，停止生成完整审查报告: 第1块: timeout; 第3块: schema bad",
+    }
+
+
 def test_online_cache_state_loads_resume_cache_when_enabled(tmp_path):
     resume_dir = tmp_path / ".paper_audit_resume"
     resume_dir.mkdir()
@@ -1794,6 +1808,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.llm_chunk_cache_read_state is paper_audit.llm_chunk_cache_read_state
     assert veritas.run_logging.apply_llm_partial_report_warning is paper_audit.apply_llm_partial_report_warning
     assert veritas.run_logging.save_llm_failure_cache_result is paper_audit.save_llm_failure_cache_result
+    assert veritas.run_logging.llm_retry_failure_summary is paper_audit.llm_retry_failure_summary
     assert veritas.run_logging.online_cache_state is paper_audit.online_cache_state
     assert veritas.run_logging.save_online_cache_result is paper_audit.save_online_cache_result
     assert veritas.run_logging.image_audit_cache_state is paper_audit.image_audit_cache_state
