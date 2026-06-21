@@ -19,6 +19,7 @@ __all__ = [
     "open_html_artifact",
     "report_action_api_response_from_namespace",
     "_read_json_request_body",
+    "serve_report_actions_from_namespace",
 ]
 
 
@@ -147,3 +148,63 @@ def _read_json_request_body(handler, max_bytes=2_000_000):
         raise ValueError("request_too_large")
     body = handler.rfile.read(length).decode("utf-8", errors="replace")
     return json.loads(body or "{}")
+
+
+def serve_report_actions_from_namespace(namespace, host="127.0.0.1", port=8765):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    print_func = _namespace_value(namespace, "print", print)
+    api_response = _namespace_value(namespace, "_report_action_api_response")
+    if not callable(api_response):
+        api_response = lambda route, payload: report_action_api_response_from_namespace(namespace, route, payload)
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "PaperAuditActions/1.0"
+
+        def _send_json(self, payload, status=200):
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_OPTIONS(self):
+            self._send_json({"ok": True})
+
+        def do_GET(self):
+            if self.path.rstrip("/") == "/health":
+                self._send_json({"ok": True, "model": _namespace_value(namespace, "LLM_MODEL", "")})
+            else:
+                self._send_json({"ok": False, "error": "not_found"}, 404)
+
+        def do_POST(self):
+            route = self.path.rstrip("/")
+            if route not in {"/generate", "/followups"}:
+                self._send_json({"ok": False, "error": "not_found"}, 404)
+                return
+            try:
+                payload = _read_json_request_body(self)
+                self._send_json(api_response(route, payload))
+            except ValueError as e:
+                status = 413 if str(e) == "request_too_large" else 400
+                self._send_json({"ok": False, "error": str(e)}, status)
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+
+        def log_message(self, fmt, *args):
+            print_func(f"[report-actions] {self.address_string()} {fmt % args}")
+
+    httpd = ThreadingHTTPServer((host, int(port)), Handler)
+    print_func(f"🌐 报告动作服务已启动: http://{host}:{port}")
+    print_func("   在HTML报告中点击“生成 PubPeer Comment”或“生成期刊 Letter”即可调用已配置的LLM。按 Ctrl+C 停止。")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print_func("\n⏹️ 报告动作服务已停止")
+    finally:
+        httpd.server_close()
+    return 0

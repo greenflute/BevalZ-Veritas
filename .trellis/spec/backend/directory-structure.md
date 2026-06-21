@@ -203,10 +203,10 @@ tests/
   service process management and HTTP handlers remain outside this boundary.
 - `veritas/report_action_service.py` owns local report action service health
   checks, background startup, HTML artifact opening, and shared JSON request
-  parsing/response payloads. `veritas.legacy` should wrap namespace-aware
-  service helpers so historical monkeypatches of service health, subprocess
-  spawning, follow-up generation, and timeout globals continue to affect
-  GUI/report-action behavior.
+  parsing/response payloads plus the local HTTP action-service handler.
+  `veritas.legacy` should wrap namespace-aware service helpers so historical
+  monkeypatches of service health, subprocess spawning, follow-up generation,
+  and timeout globals continue to affect GUI/report-action behavior.
 - `veritas/report_checks.py` owns deterministic LLM finding suspicion scoring,
   source tags, source/reason extraction, merged-finding summary HTML, and check
   sort/verdict helpers shared by report rendering and evidence-chain clustering.

@@ -862,6 +862,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.report_action_service.open_html_artifact is paper_audit.open_html_artifact
     assert callable(veritas.report_action_service.report_action_api_response_from_namespace)
     assert veritas.report_action_service._read_json_request_body is paper_audit._read_json_request_body
+    assert callable(veritas.report_action_service.serve_report_actions_from_namespace)
     assert veritas.followups.normalize_followup_language is paper_audit.normalize_followup_language
     assert veritas.followups.normalize_followup_tone is paper_audit.normalize_followup_tone
     assert veritas.followups.normalize_article_identity is paper_audit.normalize_article_identity

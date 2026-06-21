@@ -259,6 +259,7 @@ from .report_action_service import (
     open_html_artifact,
     report_action_api_response_from_namespace,
     report_action_service_health,
+    serve_report_actions_from_namespace,
 )
 from .review_overview import (
     build_audit_action_items,
@@ -1097,58 +1098,7 @@ def _report_action_api_response(route, payload):
 
 
 def serve_report_actions(host="127.0.0.1", port=8765):
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "PaperAuditActions/1.0"
-
-        def _send_json(self, payload, status=200):
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def do_OPTIONS(self):
-            self._send_json({"ok": True})
-
-        def do_GET(self):
-            if self.path.rstrip("/") == "/health":
-                self._send_json({"ok": True, "model": LLM_MODEL})
-            else:
-                self._send_json({"ok": False, "error": "not_found"}, 404)
-
-        def do_POST(self):
-            route = self.path.rstrip("/")
-            if route not in {"/generate", "/followups"}:
-                self._send_json({"ok": False, "error": "not_found"}, 404)
-                return
-            try:
-                payload = _read_json_request_body(self)
-                self._send_json(_report_action_api_response(route, payload))
-            except ValueError as e:
-                status = 413 if str(e) == "request_too_large" else 400
-                self._send_json({"ok": False, "error": str(e)}, status)
-            except Exception as e:
-                self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
-
-        def log_message(self, fmt, *args):
-            print(f"[report-actions] {self.address_string()} {fmt % args}")
-
-    httpd = ThreadingHTTPServer((host, int(port)), Handler)
-    print(f"🌐 报告动作服务已启动: http://{host}:{port}")
-    print("   在HTML报告中点击“生成 PubPeer Comment”或“生成期刊 Letter”即可调用已配置的LLM。按 Ctrl+C 停止。")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\n⏹️ 报告动作服务已停止")
-    finally:
-        httpd.server_close()
-    return 0
+    return serve_report_actions_from_namespace(globals(), host=host, port=port)
 
 
 def web_runner_default_output_stem(input_path, timestamp=None):
