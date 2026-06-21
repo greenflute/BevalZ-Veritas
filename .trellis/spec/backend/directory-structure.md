@@ -110,6 +110,11 @@ tests/
   fields fail early. Stage helpers that return either success payloads or
   `AuditFailure` should use a narrow result dataclass for that stage rather
   than a generic catch-all result object.
+- Keep `veritas.legacy.run_audit` as a thin entry point: validate the request,
+  prepare `RunAuditContext`, then delegate to an internal orchestrator. Per-run
+  mutable orchestration state such as `completed_stages`, preflight cache/results,
+  and failed-run artifact recording should live on that orchestrator, not in
+  nested closures inside `run_audit`.
 - Avoid adding new orchestration logic directly to `paper_audit.py`.
 
 ---
