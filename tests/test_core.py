@@ -4828,6 +4828,38 @@ def test_markdown_check_overview_row_escapes_cells_and_fallbacks():
     assert row == "| 5 | 数据\\|结果 | 样本量 | ⚠️存疑 | - |"
 
 
+def test_markdown_check_detail_lines_include_evidence_reason_and_merged_summary():
+    lines = veritas.report_markdown._markdown_check_detail_lines(
+        6,
+        {"category": "图像", "item": "重复图", "verdict": "🚩红旗", "source_text": "Figure 1", "reason": "overlap"},
+        lambda check: check.get("source_text", ""),
+        lambda check: check.get("reason", ""),
+        lambda check: "merged summary",
+    )
+
+    assert lines == [
+        '<a id="check-6"></a>',
+        "### 6. 图像 - 重复图 — 🚩红旗",
+        "> **原文/证据摘录**: Figure 1",
+        "\n**可疑原因/详细说明**：overlap",
+        "\n**相近疑点统合**：merged summary。完整成员见 HTML 展开区或 JSON `merged_group.members`。",
+        "",
+    ]
+
+
+def test_markdown_check_detail_lines_fallback_when_source_missing():
+    lines = veritas.report_markdown._markdown_check_detail_lines(
+        1,
+        {"category": "方法", "item": "描述", "verdict": "⚠️存疑"},
+        lambda check: "",
+        lambda check: "",
+        lambda check: "",
+    )
+
+    assert "LLM未提供明确原文摘录" in lines[2]
+    assert len(lines) == 4
+
+
 def test_reports_include_review_overview_and_internal_evidence_links(tmp_path):
     stat = {
         "benford_deviation": None,

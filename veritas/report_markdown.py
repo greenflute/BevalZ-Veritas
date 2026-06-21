@@ -138,6 +138,26 @@ def _markdown_check_overview_row(index, check, md_escape, check_source_text, bri
     )
 
 
+def _markdown_check_detail_lines(index, check, check_source_text, check_reason, merged_group_summary):
+    lines = [
+        f'<a id="check-{index}"></a>',
+        f"### {index}. {check.get('category', 'N/A')} - {check.get('item', 'N/A')} — {check.get('verdict', 'N/A')}",
+    ]
+    source = check_source_text(check)
+    reason = check_reason(check)
+    if source:
+        lines.append(f"> **原文/证据摘录**: {source}")
+    else:
+        lines.append("> **原文/证据摘录**: LLM未提供明确原文摘录，请人工回查对应段落。")
+    if reason:
+        lines.append(f"\n**可疑原因/详细说明**：{reason}")
+    merged_summary = merged_group_summary(check)
+    if merged_summary:
+        lines.append(f"\n**相近疑点统合**：{merged_summary}。完整成员见 HTML 展开区或 JSON `merged_group.members`。")
+    lines.append("")
+    return lines
+
+
 def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result):
     """Format the audit result as a Markdown report."""
     normalize_meta = _namespace_value(namespace, "normalize_run_meta", normalize_run_meta)
@@ -230,20 +250,7 @@ def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result)
         lines.append("## 📋 逐条详细分析（含原文支撑）")
         lines.append("")
         for i, c in enumerate(checks, 1):
-            lines.append(f'<a id="check-{i}"></a>')
-            lines.append(f"### {i}. {c.get('category', 'N/A')} - {c.get('item', 'N/A')} — {c.get('verdict', 'N/A')}")
-            source = check_source_text(c)
-            reason = check_reason(c)
-            if source:
-                lines.append(f"> **原文/证据摘录**: {source}")
-            else:
-                lines.append("> **原文/证据摘录**: LLM未提供明确原文摘录，请人工回查对应段落。")
-            if reason:
-                lines.append(f"\n**可疑原因/详细说明**：{reason}")
-            merged_summary = merged_group_summary(c)
-            if merged_summary:
-                lines.append(f"\n**相近疑点统合**：{merged_summary}。完整成员见 HTML 展开区或 JSON `merged_group.members`。")
-            lines.append("")
+            lines.extend(_markdown_check_detail_lines(i, c, check_source_text, check_reason, merged_group_summary))
 
     if report.get("conclusion"):
         lines.append("## 📝 综合结论")
