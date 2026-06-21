@@ -140,6 +140,13 @@ class Stage1TextExtractionResult:
 
 
 @dataclass
+class ReferenceFileExtractionResult:
+    """Result returned by directory reference-file text extraction."""
+    reference_file_texts: List[str] = field(default_factory=list)
+    failure: Any = None
+
+
+@dataclass
 class TextLlmReviewStageResult:
     """Result returned by the text-LLM review orchestration."""
     report: Dict[str, Any] = field(default_factory=dict)
@@ -208,6 +215,7 @@ __all__ = [
     "RunRequest",
     "RunAuditContext",
     "Stage1TextExtractionResult",
+    "ReferenceFileExtractionResult",
     "TextLlmReviewStageResult",
     "ImageRiskEvidenceStageResult",
     "RunResult",

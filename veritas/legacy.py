@@ -304,6 +304,7 @@ from .resource_reporting import (
 )
 from .run_types import (
     ImageRiskEvidenceStageResult,
+    ReferenceFileExtractionResult,
     RunAuditContext,
     RunRequest,
     RunResult,
@@ -3173,7 +3174,7 @@ def _extract_directory_audit_files(input_path, audit_files, file_classes, args, 
         dependency, _ = optional_dependency_for_extension(file_path.suffix)
         if dependency:
             message = f"目录审查中的审查相关文件 {file_path.name} 需要安装可选依赖 {dependency}。"
-            return {"failure": _directory_dependency_failure(file_path, message, completed_stages, retry_command, resume_dir)}
+            return Stage1TextExtractionResult(failure=_directory_dependency_failure(file_path, message, completed_stages, retry_command, resume_dir))
         file_content = extract_text_from_file(
             file_path,
             max_chars_per_file=None,
@@ -3184,7 +3185,7 @@ def _extract_directory_audit_files(input_path, audit_files, file_classes, args, 
         body_text = extracted_body_text(file_content, file_path.name)
         if not body_text or body_text.startswith("[文件解析失败:"):
             category = _directory_file_audit_category(file_classes, file_path)
-            return {"failure": AuditFailure(
+            return Stage1TextExtractionResult(failure=AuditFailure(
                 capability="input_extraction",
                 error_class="no_extractable_text",
                 message=f"未能从目录审查相关文件 {file_path.name} 提取到可审查文本。",
@@ -3198,7 +3199,7 @@ def _extract_directory_audit_files(input_path, audit_files, file_classes, args, 
                     "extract_preview": _brief_text(file_content, 240),
                     "resume_dir": str(resume_dir),
                 },
-            )}
+            ))
         try:
             rel_path = str(file_path.relative_to(input_path))
         except Exception:
@@ -3212,7 +3213,7 @@ def _extract_directory_audit_files(input_path, audit_files, file_classes, args, 
         progress_bar(idx, max(total_files, 1), f"阶段1/5 已完成: {file_path.name}")
         full_text += f"\n\n=== 文件: {file_path.name} 路径: {file_path.relative_to(input_path)} ==="
         full_text += "\n" + file_content
-    return {"full_text": full_text, "extracted_file_texts": extracted_file_texts}
+    return Stage1TextExtractionResult(full_text=full_text, extracted_file_texts=extracted_file_texts)
 
 
 def _extract_directory_reference_files(reference_files, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir):
@@ -3223,7 +3224,7 @@ def _extract_directory_reference_files(reference_files, args, output_dir, use_mi
         dependency, _ = optional_dependency_for_extension(file_path.suffix)
         if dependency:
             message = f"目录审查中的参考文献文件 {file_path.name} 需要安装可选依赖 {dependency}。"
-            return {"failure": _directory_dependency_failure(file_path, message, completed_stages, retry_command, resume_dir)}
+            return ReferenceFileExtractionResult(failure=_directory_dependency_failure(file_path, message, completed_stages, retry_command, resume_dir))
         reference_content = extract_text_from_file(
             file_path,
             max_chars_per_file=None,
@@ -3232,7 +3233,7 @@ def _extract_directory_reference_files(reference_files, args, output_dir, use_mi
             output_dir=output_dir,
         )
         if not extracted_body_text(reference_content, file_path.name):
-            return {"failure": AuditFailure(
+            return ReferenceFileExtractionResult(failure=AuditFailure(
                 capability="input_extraction",
                 error_class="no_extractable_text",
                 message=f"未能从目录审查相关参考文献文件 {file_path.name} 提取到可审查文本。",
@@ -3240,9 +3241,9 @@ def _extract_directory_reference_files(reference_files, args, output_dir, use_mi
                 completed_stages=completed_stages,
                 retry_command=retry_command,
                 details={"file": str(file_path), "extension": file_path.suffix.lower(), "resume_dir": str(resume_dir)},
-            )}
+            ))
         reference_file_texts.append(reference_content)
-    return {"reference_file_texts": reference_file_texts}
+    return ReferenceFileExtractionResult(reference_file_texts=reference_file_texts)
 
 
 def _extract_directory_input(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir):
@@ -3271,8 +3272,8 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
         retry_command,
         resume_dir,
     )
-    if audit_result.get("failure"):
-        return Stage1TextExtractionResult(failure=audit_result["failure"])
+    if audit_result.failure:
+        return Stage1TextExtractionResult(failure=audit_result.failure)
     reference_result = _extract_directory_reference_files(
         reference_files,
         args,
@@ -3282,10 +3283,10 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
         retry_command,
         resume_dir,
     )
-    if reference_result.get("failure"):
-        return Stage1TextExtractionResult(failure=reference_result["failure"])
+    if reference_result.failure:
+        return Stage1TextExtractionResult(failure=reference_result.failure)
 
-    full_text = audit_result["full_text"]
+    full_text = audit_result.full_text
     meta = {
         "input_type": "directory",
         "total_files": len(all_files),
@@ -3296,14 +3297,14 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
         "extractor": "directory_multi_format",
         "extraction_method": "directory_multi_format",
         "size_mb": round(sum(p.stat().st_size for p in all_files if p.exists()) / 1024 / 1024, 2),
-        "reference_file_text": "\n\n".join(reference_result["reference_file_texts"]),
+        "reference_file_text": "\n\n".join(reference_result.reference_file_texts),
     }
     print(f"\n✅ 所有文件提取完成，总长度: {len(full_text)} 字符")
     progress_bar(1, 5, "阶段1/5 文本提取完成")
     return Stage1TextExtractionResult(
         full_text=full_text,
         meta=meta,
-        extracted_file_texts=audit_result["extracted_file_texts"],
+        extracted_file_texts=audit_result.extracted_file_texts,
     )
 
 
