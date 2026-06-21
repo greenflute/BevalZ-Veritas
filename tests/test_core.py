@@ -1961,6 +1961,23 @@ def test_extract_pattern_json_array_parses_embedded_array_and_errors():
     assert isinstance(error, json.JSONDecodeError)
 
 
+def test_build_pattern_extraction_request_parts_includes_comments_and_auth():
+    payload, headers = veritas.pattern_updates._build_pattern_extraction_request_parts(
+        "Duplicated western blot panels are discussed.",
+        "pattern-model",
+        "secret-key",
+    )
+
+    assert payload["model"] == "pattern-model"
+    assert payload["temperature"] == 0.3
+    assert payload["messages"][0]["role"] == "system"
+    assert "Duplicated western blot panels" in payload["messages"][1]["content"]
+    assert headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer secret-key",
+    }
+
+
 def test_http_request_uses_browser_user_agent_without_network(monkeypatch):
     calls = []
 

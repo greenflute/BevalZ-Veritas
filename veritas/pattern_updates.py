@@ -23,6 +23,44 @@ def _extract_pattern_json_array(content, json_module=json, re_module=re):
         return None, error
 
 
+def _build_pattern_extraction_request_parts(comments_text, model, api_key):
+    extract_prompt = f"""分析以下来自PubPeer的学术评论，提取其中涉及的学术论文造假/可疑手法。
+
+要求：
+1. 每个造假手法提取为一个独立的模式条目
+2. 按JSON数组格式输出，每个条目包含：id(英文大写下划线), category(分类), name(中文名), description(详细描述), detection_hint(检测提示), risk_level(高/中/低)
+3. 只提取确实存在的造假手法，不要臆造
+4. 合并相似的造假手法
+
+PubPeer评论内容：
+{comments_text}
+
+输出格式：
+[
+  {{
+    "id": "PATTERN_ID",
+    "category": "图片与图表/数据与结果/方法论/结构与引用/作者与期刊",
+    "name": "手法名称",
+    "description": "手法描述",
+    "detection_hint": "审查时如何检测此手法",
+    "risk_level": "高/中/低"
+  }}
+]"""
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是一个学术论文打假专家，擅长从PubPeer评论中识别和归纳造假手法。"},
+            {"role": "user", "content": extract_prompt},
+        ],
+        "temperature": 0.3,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    return payload, headers
+
+
 def update_patterns_from_namespace(namespace, comments_file):
     """Extract fraud patterns from PubPeer comments and update the local KB."""
     path_cls = _namespace_value(namespace, "Path", Path)
@@ -47,41 +85,11 @@ def update_patterns_from_namespace(namespace, comments_file):
     print(f"📖 已读取评论文本: {len(comments_text)}字符")
     print("🤖 正在用LLM分析评论，提取欺诈模式...")
 
-    extract_prompt = f"""分析以下来自PubPeer的学术评论，提取其中涉及的学术论文造假/可疑手法。
-
-要求：
-1. 每个造假手法提取为一个独立的模式条目
-2. 按JSON数组格式输出，每个条目包含：id(英文大写下划线), category(分类), name(中文名), description(详细描述), detection_hint(检测提示), risk_level(高/中/低)
-3. 只提取确实存在的造假手法，不要臆造
-4. 合并相似的造假手法
-
-PubPeer评论内容：
-{comments_text}
-
-输出格式：
-[
-  {{
-    "id": "PATTERN_ID",
-    "category": "图片与图表/数据与结果/方法论/结构与引用/作者与期刊",
-    "name": "手法名称",
-    "description": "手法描述",
-    "detection_hint": "审查时如何检测此手法",
-    "risk_level": "高/中/低"
-  }}
-]"""
-
-    payload = {
-        "model": _namespace_value(namespace, "LLM_MODEL", ""),
-        "messages": [
-            {"role": "system", "content": "你是一个学术论文打假专家，擅长从PubPeer评论中识别和归纳造假手法。"},
-            {"role": "user", "content": extract_prompt},
-        ],
-        "temperature": 0.3,
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {_namespace_value(namespace, 'LLM_API_KEY', '')}",
-    }
+    payload, headers = _build_pattern_extraction_request_parts(
+        comments_text,
+        _namespace_value(namespace, "LLM_MODEL", ""),
+        _namespace_value(namespace, "LLM_API_KEY", ""),
+    )
 
     req = urllib_request.Request(
         _namespace_value(namespace, "LLM_API_URL", ""),
