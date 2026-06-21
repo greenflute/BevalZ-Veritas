@@ -27,6 +27,7 @@ __all__ = [
     "apply_llm_partial_report_warning",
     "save_llm_failure_cache_result",
     "llm_retry_start_summary",
+    "llm_cache_only_still_failed",
     "llm_retry_failure_summary",
     "llm_no_success_failure_summary",
     "llm_merge_done_detail",
@@ -415,6 +416,11 @@ def llm_retry_start_summary(failed_chunks, llm_cache_only):
         "failed_chunks": failed_nums,
         "event_detail": f"failed_chunks={failed_nums}; cache_only={llm_cache_only}",
     }
+
+
+def llm_cache_only_still_failed(failed_chunks):
+    """Convert first-pass failed chunk records into final failures for cache-only mode."""
+    return [(idx, first_error) for _, idx, first_error in failed_chunks]
 
 
 def llm_retry_failure_summary(still_failed, strict_failed_chunks):

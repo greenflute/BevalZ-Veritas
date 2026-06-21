@@ -170,6 +170,7 @@ from .run_logging import (
     image_audit_cache_state,
     image_detector_cache_save_callback,
     image_semantic_cache_save_callback,
+    llm_cache_only_still_failed,
     llm_chunk_cache_read_state,
     llm_failure_cache_payload,
     llm_merge_done_detail,
@@ -3365,7 +3366,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
             resume_event(resume_dir, "stage3_llm_retry", "start", retry_summary["event_detail"])
             still_failed = []
             if getattr(args, "llm_cache_only", False):
-                still_failed = [(idx, first_error) for _, idx, first_error in failed_chunks]
+                still_failed = llm_cache_only_still_failed(failed_chunks)
                 print("⚠️ cache-only模式：不调用API重试，直接用已有成功缓存生成部分报告。")
             else:
                 for chunk_text, chunk_idx, first_error in failed_chunks:

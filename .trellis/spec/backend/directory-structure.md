@@ -362,8 +362,8 @@ tests/
   cache-read policy, text-LLM stage chunk/cache planning, text-LLM cache
   payload construction, text-LLM chunk cache read-state events, text-LLM
   failure cache save events, text-LLM retry-start/retry-failure/all-failed
-  summaries, text-LLM merge-completion details, text-LLM coverage metadata, text-LLM
-  partial-report warning application, extraction-cache
+  summaries, text-LLM cache-only failure conversion, text-LLM merge-completion
+  details, text-LLM coverage metadata, text-LLM partial-report warning application, extraction-cache
   matching/state normalization/payload construction/save-event recording,
   online-check cache path/state/save-event construction, image-audit cache
   path/state/save-callback construction, run-summary input/route/scope helpers,
