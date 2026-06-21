@@ -4312,6 +4312,28 @@ def test_format_html_check_table_row_escapes_fields_and_uses_summary_renderer():
     assert '<td class="evidence-cell"><em>Methods n=42:120</em></td>' in row
 
 
+def test_format_html_detail_card_renders_escaped_detail_evidence():
+    card = veritas.report_html_sections._format_html_detail_card(
+        4,
+        {"category": "图像<组>", "item": "重复图", "verdict": "🚩红旗", "source_text": "Figure 1", "reason": "Overlap <risk>"},
+        paper_audit._html_escape,
+        lambda verdict: "verdict-red",
+        lambda check: check.get("source_text", ""),
+        lambda check: check.get("reason", ""),
+        lambda check: "<div class=\"merged-group\">merged</div>",
+        paper_audit._brief_text,
+        lambda source: f"<blockquote>{paper_audit._html_escape(source)}</blockquote>",
+    )
+
+    assert 'id="check-4"' in card
+    assert '<span class="detail-num">#4</span>' in card
+    assert "图像&lt;组&gt;" in card
+    assert '<span class="verdict-red detail-verdict">🚩红旗</span>' in card
+    assert "Overlap &lt;risk&gt;" in card
+    assert "<div class=\"merged-group\">merged</div>" in card
+    assert "<blockquote>Figure 1</blockquote>" in card
+
+
 def test_clipboard_windows_uses_clip_exe_without_shell(monkeypatch):
     calls = []
 

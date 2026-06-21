@@ -89,6 +89,41 @@ def _format_html_check_table_row(
             </tr>"""
 
 
+def _format_html_detail_card(
+    index,
+    check,
+    html_escape,
+    verdict_class_for,
+    check_source_text,
+    check_reason,
+    merged_group_html,
+    brief_text,
+    evidence_html,
+):
+    verdict = check.get("verdict", "N/A")
+    verdict_class = verdict_class_for(verdict)
+    source = check_source_text(check)
+    reason = check_reason(check)
+    source_html = evidence_html(source or "LLM未提供明确原文摘录，请人工回查对应段落。")
+    merged_html = merged_group_html(check)
+    return f"""
+            <details class="detail-card" id="check-{index}">
+                <summary class="detail-header detail-summary">
+                    <span class="detail-num">#{index}</span>
+                    <span class="detail-cat">{html_escape(check.get('category', 'N/A'))}</span>
+                    <span class="detail-item">{html_escape(check.get('item', 'N/A'))}</span>
+                    <span class="{verdict_class} detail-verdict">{html_escape(verdict)}</span>
+                    <span class="detail-brief">{html_escape(brief_text(reason or source or '无摘要', 120))}</span>
+                    <span class="summary-action">查看详情</span>
+                </summary>
+                <div class="detail-body">
+                    {merged_html}
+                    <div class="detail-evidence"><strong>原文/证据摘录</strong>{source_html}</div>
+                    <div class="detail-text"><strong>可疑原因/详细说明</strong><p>{html_escape(reason or 'LLM未提供详细说明。')}</p></div>
+                </div>
+            </details>"""
+
+
 def format_html_check_sections_from_namespace(namespace, report):
     """Render LLM check summary/detail sections for the top-level HTML report."""
     html_escape = _namespace_value(namespace, "_html_escape", _html_escape)
@@ -144,28 +179,17 @@ def format_html_check_sections_from_namespace(namespace, report):
 
     detail_cards = ""
     for i, c in enumerate(checks, 1):
-        verdict = c.get("verdict", "N/A")
-        verdict_class = verdict_class_for(verdict)
-        source = check_source_text(c)
-        reason = check_reason(c)
-        source_html = evidence_html(source or "LLM未提供明确原文摘录，请人工回查对应段落。")
-        merged_html = merged_group_html(c)
-        detail_cards += f"""
-            <details class="detail-card" id="check-{i}">
-                <summary class="detail-header detail-summary">
-                    <span class="detail-num">#{i}</span>
-                    <span class="detail-cat">{html_escape(c.get('category', 'N/A'))}</span>
-                    <span class="detail-item">{html_escape(c.get('item', 'N/A'))}</span>
-                    <span class="{verdict_class} detail-verdict">{html_escape(verdict)}</span>
-                    <span class="detail-brief">{html_escape(brief_text(reason or source or '无摘要', 120))}</span>
-                    <span class="summary-action">查看详情</span>
-                </summary>
-                <div class="detail-body">
-                    {merged_html}
-                    <div class="detail-evidence"><strong>原文/证据摘录</strong>{source_html}</div>
-                    <div class="detail-text"><strong>可疑原因/详细说明</strong><p>{html_escape(reason or 'LLM未提供详细说明。')}</p></div>
-                </div>
-            </details>"""
+        detail_cards += _format_html_detail_card(
+            i,
+            c,
+            html_escape,
+            verdict_class_for,
+            check_source_text,
+            check_reason,
+            merged_group_html,
+            brief_text,
+            evidence_html,
+        )
 
     checks_html = f"""
         <div class="section evidence-summary" id="suspicious-findings">
