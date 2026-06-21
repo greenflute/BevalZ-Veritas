@@ -3011,7 +3011,7 @@ def _extract_non_pdf_input_file(file_path, single_suffix, args, output_dir, comp
     )
     if missing_dependency:
         dependency, install_command = optional_dependency_for_extension(single_suffix)
-        return {"failure": AuditFailure(
+        return Stage1TextExtractionResult(failure=AuditFailure(
             capability="input_extraction",
             error_class="missing_optional_dependency",
             message=f"读取 {single_suffix} 文件需要安装可选依赖 {dependency}。",
@@ -3019,7 +3019,7 @@ def _extract_non_pdf_input_file(file_path, single_suffix, args, output_dir, comp
             completed_stages=completed_stages,
             retry_command=retry_command,
             details={"dependency": dependency, "install_command": install_command, "resume_dir": str(resume_dir)},
-        )}
+        ))
     print(f"📖 正在提取{single_suffix}文件文本: {file_path}")
     full_text = extract_text_from_file(
         file_path,
@@ -3030,14 +3030,14 @@ def _extract_non_pdf_input_file(file_path, single_suffix, args, output_dir, comp
     )
     body_text = extracted_body_text(full_text, file_path.name)
     if not body_text:
-        return {"failure": AuditFailure(
+        return Stage1TextExtractionResult(failure=AuditFailure(
             capability="input_extraction",
             error_class="no_extractable_text",
             message=f"未能从 {single_suffix} 文件中提取到可审查文本。",
             fix_hints=["检查文件是否为空、损坏或受保护。", "尝试另存为 .docx/PDF 后重试。"],
             completed_stages=completed_stages,
             retry_command=retry_command,
-        )}
+        ))
     meta = {
         "input_type": "file",
         "source_file": file_path.name,
@@ -3049,12 +3049,12 @@ def _extract_non_pdf_input_file(file_path, single_suffix, args, output_dir, comp
     }
     print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
     progress_bar(1, 5, "阶段1/5 单文件文本提取完成")
-    return {
-        "full_text": full_text,
-        "meta": meta,
-        "raw_pdf": None,
-        "extracted_file_texts": _single_file_text_entry(file_path, full_text),
-    }
+    return Stage1TextExtractionResult(
+        full_text=full_text,
+        meta=meta,
+        raw_pdf=None,
+        extracted_file_texts=_single_file_text_entry(file_path, full_text),
+    )
 
 
 def _extract_pdf_input_file(file_path, args, output_dir, use_mineru, completed_stages, retry_command):
@@ -3090,35 +3090,35 @@ def _extract_pdf_input_file(file_path, args, output_dir, use_mineru, completed_s
         if not full_text:
             print("❌ 未能从PDF中提取到文本（可能是扫描件或加密PDF）")
             print("💡 建议: 使用 --mineru 参数通过MinerU API提取（支持OCR）")
-            return {"failure": AuditFailure(
+            return Stage1TextExtractionResult(failure=AuditFailure(
                 capability="input_extraction",
                 error_class="no_extractable_text",
                 message="未能从PDF中提取到文本（可能是扫描件或加密PDF）。",
                 fix_hints=["检查PDF是否加密或为扫描件。", "确认MinerU配置可用后重试。"],
                 completed_stages=completed_stages,
                 retry_command=retry_command,
-            )}
+            ))
         print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
         progress_bar(1, 5, "阶段1/5 PDF文本提取完成")
 
-    return {
-        "full_text": full_text,
-        "meta": meta,
-        "raw_pdf": raw_pdf,
-        "use_mineru": use_mineru,
-        "extracted_file_texts": _single_file_text_entry(file_path, full_text),
-    }
+    return Stage1TextExtractionResult(
+        full_text=full_text,
+        meta=meta,
+        raw_pdf=raw_pdf,
+        use_mineru=use_mineru,
+        extracted_file_texts=_single_file_text_entry(file_path, full_text),
+    )
 
 
 def _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir):
     print(f"📄 检测到输入为单个文件: {input_path.name}")
     single_suffix = input_path.suffix.lower()
     if single_suffix not in SUPPORTED_TEXT_FILE_EXTENSIONS:
-        return {"failure": _unsupported_single_input_failure(single_suffix, completed_stages, retry_command)}
+        return Stage1TextExtractionResult(failure=_unsupported_single_input_failure(single_suffix, completed_stages, retry_command))
     if single_suffix != ".pdf":
         result = _extract_non_pdf_input_file(input_path, single_suffix, args, output_dir, completed_stages, retry_command, resume_dir)
-        if "failure" not in result:
-            result["use_mineru"] = use_mineru
+        if not result.failure:
+            result.use_mineru = use_mineru
         return result
     return _extract_pdf_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command)
 
@@ -3272,7 +3272,7 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
         resume_dir,
     )
     if audit_result.get("failure"):
-        return audit_result
+        return Stage1TextExtractionResult(failure=audit_result["failure"])
     reference_result = _extract_directory_reference_files(
         reference_files,
         args,
@@ -3283,7 +3283,7 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
         resume_dir,
     )
     if reference_result.get("failure"):
-        return reference_result
+        return Stage1TextExtractionResult(failure=reference_result["failure"])
 
     full_text = audit_result["full_text"]
     meta = {
@@ -3300,11 +3300,11 @@ def _extract_directory_input(input_path, args, output_dir, use_mineru, completed
     }
     print(f"\n✅ 所有文件提取完成，总长度: {len(full_text)} 字符")
     progress_bar(1, 5, "阶段1/5 文本提取完成")
-    return {
-        "full_text": full_text,
-        "meta": meta,
-        "extracted_file_texts": audit_result["extracted_file_texts"],
-    }
+    return Stage1TextExtractionResult(
+        full_text=full_text,
+        meta=meta,
+        extracted_file_texts=audit_result["extracted_file_texts"],
+    )
 
 
 def _text_llm_schema_failure(message, details, completed_stages, retry_command):
@@ -3542,23 +3542,23 @@ def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default
 
     if full_text is None and input_path.is_dir():
         directory_result = _extract_directory_input(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
-        if directory_result.get("failure"):
+        if directory_result.failure:
             return Stage1TextExtractionResult(
-                failure=directory_result["failure"],
+                failure=directory_result.failure,
                 diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
             )
-        full_text = directory_result["full_text"]
-        meta = directory_result["meta"]
-        extracted_file_texts = directory_result["extracted_file_texts"]
+        full_text = directory_result.full_text
+        meta = directory_result.meta
+        extracted_file_texts = directory_result.extracted_file_texts
     elif full_text is None:
         single_result = _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
-        if single_result.get("failure"):
-            return Stage1TextExtractionResult(failure=single_result["failure"])
-        full_text = single_result["full_text"]
-        meta = single_result["meta"]
-        raw_pdf = single_result["raw_pdf"]
-        use_mineru = single_result["use_mineru"]
-        extracted_file_texts = single_result["extracted_file_texts"]
+        if single_result.failure:
+            return Stage1TextExtractionResult(failure=single_result.failure)
+        full_text = single_result.full_text
+        meta = single_result.meta
+        raw_pdf = single_result.raw_pdf
+        use_mineru = single_result.use_mineru
+        extracted_file_texts = single_result.extracted_file_texts
 
     meta = normalize_run_meta(meta, input_path, full_text)
     meta["runtime"] = run_runtime
