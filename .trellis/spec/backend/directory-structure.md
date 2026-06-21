@@ -266,9 +266,10 @@ tests/
   parsing and online lookup remain outside this boundary.
 - `veritas/report_action_context.py` owns deterministic construction of the
   saved-report context consumed by HTML PubPeer/comment and journal-letter
-  actions, including top issue extraction from existing LLM checks. It may
-  aggregate already-computed audit payloads, but must not start local services,
-  call providers, or perform network I/O.
+  actions, including top issue extraction from existing LLM checks and
+  cross-file consistency findings. It may aggregate already-computed audit
+  payloads, but must not start local services, call providers, or perform
+  network I/O.
 - `veritas/report_action_panel.py` owns deterministic HTML rendering and
   browser action-script generation for the saved-report PubPeer/comment and
   journal-letter action panel. Local action service process management and HTTP

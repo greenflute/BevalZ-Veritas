@@ -6748,6 +6748,36 @@ def test_report_action_audit_issues_select_suspicious_checks_and_clean_evidence(
     assert issues[0]["reason"] == "Methods and results disagree"
 
 
+def test_report_action_cross_file_issues_build_evidence_and_limit_results():
+    issues = veritas.report_action_context._report_action_cross_file_issues(
+        {
+            "findings": [
+                {
+                    "severity": "medium",
+                    "conflict_type": f"sample_mismatch_{idx}",
+                    "claim_source_label": "Main",
+                    "claim_file": "paper.pdf",
+                    "claim_excerpt": f"Methods n={idx}",
+                    "counter_source_label": "Supplement",
+                    "counter_file": "supp.docx",
+                    "counter_excerpt": f"Results n={idx + 1}",
+                    "manual_check": "manual review needed",
+                }
+                for idx in range(10)
+            ]
+        }
+    )
+
+    assert len(issues) == 8
+    assert issues[0]["id"] == "cross-file-1"
+    assert issues[0]["source"] == "cross_file_consistency"
+    assert issues[0]["category"] == "跨文件一致性审查"
+    assert issues[0]["item"] == "sample_mismatch_0"
+    assert "Main / paper.pdf: Methods n=0 || Supplement / supp.docx: Results n=1" in issues[0]["evidence"]
+    assert issues[0]["reason"] == "manual review needed"
+    assert issues[-1]["item"] == "sample_mismatch_7"
+
+
 def test_report_action_context_cleans_reference_issue_text():
     context = paper_audit._report_action_context(
         {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"},

@@ -34,14 +34,10 @@ def _report_action_audit_issues(report):
     return issues
 
 
-def _report_action_context(report, pdf_path, meta, stat_result):
-    meta = meta or {}
-    paper_identity = meta.get("paper_identity") or {}
-    issues = _report_action_audit_issues(report)
-    cross_file_audit = (meta or {}).get("cross_file_consistency_audit") or {}
-    cross_file_issues = []
+def _report_action_cross_file_issues(cross_file_audit):
+    issues = []
     for idx, finding in enumerate((cross_file_audit.get("findings") or [])[:8], 1):
-        cross_file_issue = {
+        issues.append({
             "id": f"cross-file-{idx}",
             "source": "cross_file_consistency",
             "category": "跨文件一致性审查",
@@ -53,8 +49,16 @@ def _report_action_context(report, pdf_path, meta, stat_result):
                 900,
             ),
             "reason": _brief_text(finding.get("reason") or finding.get("manual_check"), 900),
-        }
-        cross_file_issues.append(cross_file_issue)
+        })
+    return issues
+
+
+def _report_action_context(report, pdf_path, meta, stat_result):
+    meta = meta or {}
+    paper_identity = meta.get("paper_identity") or {}
+    issues = _report_action_audit_issues(report)
+    cross_file_audit = (meta or {}).get("cross_file_consistency_audit") or {}
+    cross_file_issues = _report_action_cross_file_issues(cross_file_audit)
     issues = cross_file_issues + issues
     evidence_chain_audit = (meta or {}).get("evidence_chain_audit") or {}
     evidence_chain_issues = []
