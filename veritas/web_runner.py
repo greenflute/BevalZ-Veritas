@@ -308,18 +308,9 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 @media (max-width:900px) { main { grid-template-columns:1fr; padding:10px; } header { padding:0 12px; } #log { height:320px; } .hero-strip, .report-grid { grid-template-columns:1fr; } }"""
 
 
-def render_web_runner_page():
-    return """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Veritas Web Runner</title>
-<style>
-""" + web_runner_page_styles() + """
-</style>
-</head>
-<body>
+def web_runner_page_body_markup():
+    """Return the static body markup used by the local Web Runner page."""
+    return """<body>
 <header><h1>Veritas Web Runner</h1><span id="topStatus" class="status">local</span></header>
 <main>
   <div>
@@ -379,6 +370,21 @@ def render_web_runner_page():
     </section>
   </div>
 </main>
+"""
+
+
+def render_web_runner_page():
+    return """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veritas Web Runner</title>
+<style>
+""" + web_runner_page_styles() + """
+</style>
+</head>
+""" + web_runner_page_body_markup() + """
 <script>
 const $ = (id) => document.getElementById(id);
 let activeRunId = null;
@@ -740,6 +746,7 @@ __all__ = [
     "pick_local_path",
     "dropped_local_path_from_uri_text",
     "web_runner_page_styles",
+    "web_runner_page_body_markup",
     "render_web_runner_page",
     "web_runner_cors_headers",
 ]
