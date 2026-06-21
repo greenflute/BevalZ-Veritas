@@ -309,6 +309,7 @@ from .run_types import (
     RunRequest,
     RunResult,
     Stage1TextExtractionResult,
+    TextLlmMergeResult,
     TextLlmReviewStageResult,
 )
 from .report_schema import LLM_REQUIRED_FINDING_FIELDS, normalize_llm_report_schema, parse_report
@@ -3433,7 +3434,7 @@ def _merge_successful_llm_chunks(chunk_reports, total_chunks, chunk_size, overla
     if not chunk_reports:
         failure_summary = llm_no_success_failure_summary(failed_final)
         resume_event(resume_dir, "stage4_merge", "skipped_no_success", failure_summary["message"])
-        return {"failure_summary": failure_summary}
+        return TextLlmMergeResult(failure_summary=failure_summary)
 
     progress_bar(3, 5, "阶段3/5 LLM审查完成")
     progress_bar(3, 5, "阶段4/5 开始合并审查结果")
@@ -3447,7 +3448,7 @@ def _merge_successful_llm_chunks(chunk_reports, total_chunks, chunk_size, overla
     apply_llm_partial_report_warning(report, meta)
     resume_event(resume_dir, "stage4_merge", "done", llm_merge_done_detail(report, meta))
     progress_bar(4, 5, "阶段4/5 审查结果合并完成")
-    return {"report": report}
+    return TextLlmMergeResult(report=report)
 
 
 def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_read, allow_llm_cache_write, stat_result, meta, completed_stages, retry_command):
@@ -3510,15 +3511,15 @@ def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_rea
         resume_event(resume_dir, "stage3_llm_retry", "done", "all failed chunks recovered")
 
     merge_result = _merge_successful_llm_chunks(chunk_reports, total_chunks, chunk_size, overlap, stat_result, meta, resume_dir)
-    if merge_result.get("failure_summary"):
-        failure_summary = merge_result["failure_summary"]
+    if merge_result.failure_summary:
+        failure_summary = merge_result.failure_summary
         return TextLlmReviewStageResult(failure=_text_llm_schema_failure(
             failure_summary["message"],
             failure_summary["details"],
             completed_stages,
             retry_command,
         ))
-    return TextLlmReviewStageResult(report=merge_result["report"])
+    return TextLlmReviewStageResult(report=merge_result.report)
 
 
 def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default, completed_stages, retry_command, resume_dir, run_runtime, preflight_results):

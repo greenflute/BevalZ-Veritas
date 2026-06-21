@@ -154,6 +154,13 @@ class TextLlmReviewStageResult:
 
 
 @dataclass
+class TextLlmMergeResult:
+    """Result returned by LLM chunk merge orchestration."""
+    report: Dict[str, Any] = field(default_factory=dict)
+    failure_summary: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ImageRiskEvidenceStageResult:
     """Result returned by image, risk-rule, and evidence-chain orchestration."""
     report: Dict[str, Any] = field(default_factory=dict)
@@ -217,6 +224,7 @@ __all__ = [
     "Stage1TextExtractionResult",
     "ReferenceFileExtractionResult",
     "TextLlmReviewStageResult",
+    "TextLlmMergeResult",
     "ImageRiskEvidenceStageResult",
     "RunResult",
 ]
