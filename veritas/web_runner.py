@@ -721,9 +721,9 @@ async function pollLogs() {
 }"""
 
 
-def render_web_runner_page():
-    return web_runner_page_head_markup() + web_runner_page_body_markup() + web_runner_page_script_markup("""
-const $ = (id) => document.getElementById(id);
+def web_runner_page_state_script():
+    """Return shared state and status helpers for the page JavaScript."""
+    return """const $ = (id) => document.getElementById(id);
 let activeRunId = null;
 let logOffset = 0;
 let timer = null;
@@ -746,6 +746,12 @@ function setFeedback(text, cls='') {
   el.className = 'feedback ' + cls;
   el.textContent = text || '选择输入后点击 Start，生成的报告会在这里显示。';
 }
+"""
+
+
+def render_web_runner_page():
+    return web_runner_page_head_markup() + web_runner_page_body_markup() + web_runner_page_script_markup(
+        web_runner_page_state_script() + """
 """ + web_runner_page_path_script() + """
 """ + web_runner_page_input_script() + """
 """ + web_runner_page_report_script() + """
@@ -786,6 +792,7 @@ __all__ = [
     "web_runner_page_input_script",
     "web_runner_page_report_script",
     "web_runner_page_run_script",
+    "web_runner_page_state_script",
     "render_web_runner_page",
     "web_runner_cors_headers",
 ]
