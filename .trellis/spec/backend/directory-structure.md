@@ -59,6 +59,7 @@ veritas/
 ├── report_action_panel.py # HTML follow-up/report action panel rendering helpers
 ├── report_action_service.py # Local report action service health/startup helpers
 ├── report_checks.py    # Deterministic LLM finding scoring/display helpers
+├── report_markdown.py  # Top-level Markdown report composition
 ├── review_overview.py  # Review overview and action-priority rendering helpers
 ├── resource_availability.py # Online resource availability checks
 ├── resource_parsing.py # Resource URL extraction and classification helpers
@@ -268,6 +269,12 @@ tests/
   source tags, source/reason extraction, merged-finding summary HTML, and check
   sort/verdict helpers shared by report rendering and evidence-chain clustering.
   It must remain provider-free and must not call text LLMs or external services.
+- `veritas/report_markdown.py` owns top-level Markdown report composition,
+  including metadata header, local statistics table, LLM finding summaries, and
+  aggregation of already-rendered audit sections. It should stay
+  namespace-aware while compatibility wrappers live in `veritas.legacy`, so
+  tests and user scripts can still monkeypatch section renderers, check
+  helpers, version constants, runtime clock, and metadata normalization.
 - `veritas/review_overview.py` owns deterministic audit action-priority
   summaries and review-overview Markdown/HTML rendering. It may aggregate
   existing report, statistics, reference, resource, cross-file, evidence-chain,
