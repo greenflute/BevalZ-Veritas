@@ -6717,6 +6717,37 @@ def test_desktop_gui_refresh_runs_shows_latest_completed_run_logs():
     assert app.retry_button.state == FakeTk.NORMAL
 
 
+def test_report_action_audit_issues_select_suspicious_checks_and_clean_evidence():
+    issues = veritas.report_action_context._report_action_audit_issues(
+        {
+            "checks": [
+                {
+                    "category": "低风险",
+                    "item": "格式",
+                    "verdict": "✅正常",
+                    "source_text": "ok",
+                    "reason": "ok",
+                },
+                {
+                    "category": "数据",
+                    "item": "样本量",
+                    "verdict": "🚩红旗",
+                    "source_text": "[[TABLE_START]]Methods n=42[[TABLE_END]]",
+                    "reason": "Methods and results disagree",
+                },
+            ]
+        }
+    )
+
+    assert len(issues) == 1
+    assert issues[0]["id"] == "issue-1"
+    assert issues[0]["source"] == "audit"
+    assert issues[0]["category"] == "数据"
+    assert "Methods n=42" in issues[0]["evidence"]
+    assert "TABLE_START" not in issues[0]["evidence"]
+    assert issues[0]["reason"] == "Methods and results disagree"
+
+
 def test_report_action_context_cleans_reference_issue_text():
     context = paper_audit._report_action_context(
         {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"},

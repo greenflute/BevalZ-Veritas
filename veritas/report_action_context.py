@@ -16,9 +16,7 @@ from .text_utils import _brief_text
 __all__ = ["_report_action_context"]
 
 
-def _report_action_context(report, pdf_path, meta, stat_result):
-    meta = meta or {}
-    paper_identity = meta.get("paper_identity") or {}
+def _report_action_audit_issues(report):
     checks = sorted(report.get("checks", []) if isinstance(report, dict) else [], key=_check_sort_key)
     suspicious = [c for c in checks if _is_suspicious_check(c)]
     selected = suspicious[:10] if suspicious else checks[:8]
@@ -33,6 +31,13 @@ def _report_action_context(report, pdf_path, meta, stat_result):
             "evidence": _brief_text(_clean_mineru_table_block(_check_source_text(c)), 900),
             "reason": _brief_text(_check_reason(c), 900),
         })
+    return issues
+
+
+def _report_action_context(report, pdf_path, meta, stat_result):
+    meta = meta or {}
+    paper_identity = meta.get("paper_identity") or {}
+    issues = _report_action_audit_issues(report)
     cross_file_audit = (meta or {}).get("cross_file_consistency_audit") or {}
     cross_file_issues = []
     for idx, finding in enumerate((cross_file_audit.get("findings") or [])[:8], 1):
