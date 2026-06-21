@@ -894,6 +894,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.resource_parsing.extract_paper_resources is paper_audit.extract_paper_resources
     assert veritas.resource_parsing._clean_resource_url is paper_audit._clean_resource_url
     assert veritas.resource_parsing._classify_resource is paper_audit._classify_resource
+    assert callable(veritas.resource_availability.verify_resource_availability_from_namespace)
+    assert callable(veritas.resource_availability.audit_resources_from_namespace)
     assert veritas.resource_reporting.format_resource_audit_html is paper_audit.format_resource_audit_html
     assert veritas.resource_reporting.format_resource_audit_markdown is paper_audit.format_resource_audit_markdown
     assert veritas.report_action_context._report_action_context is paper_audit._report_action_context
@@ -3335,6 +3337,26 @@ def test_audit_resources_extracts_and_checks_code_and_deployed_urls(monkeypatch)
     assert "htps://ptcmetastasize.streamlit.app/" in urls
     assert any(issue["status"] == "malformed" for issue in audit["issues"])
     assert calls == urls
+
+
+def test_verify_resource_availability_preserves_http_request_monkeypatch(monkeypatch):
+    calls = []
+
+    def fake_http(url, method="GET", headers=None, data=None, timeout=60):
+        calls.append((url, method, headers or {}, timeout))
+        return b"", 204
+
+    monkeypatch.setattr(paper_audit, "_http_request", fake_http)
+
+    result = paper_audit.verify_resource_availability({"url": "https://example.test/app"}, timeout=4)
+
+    assert result == {
+        "status": "available",
+        "http_status": 204,
+        "problem": "",
+        "message": "reachable",
+    }
+    assert calls == [("https://example.test/app", "GET", {"Accept": "text/html,application/json,*/*;q=0.8"}, 4)]
 
 
 def test_resource_audit_renders_markdown_and_html_sections():

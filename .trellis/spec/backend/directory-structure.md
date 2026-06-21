@@ -54,6 +54,7 @@ veritas/
 ├── report_action_service.py # Local report action service health/startup helpers
 ├── report_checks.py    # Deterministic LLM finding scoring/display helpers
 ├── review_overview.py  # Review overview and action-priority rendering helpers
+├── resource_availability.py # Online resource availability checks
 ├── resource_parsing.py # Resource URL extraction and classification helpers
 ├── resource_reporting.py # Resource audit Markdown/HTML rendering helpers
 ├── risk_rule_helpers.py # Shared risk scoring/merge helpers for rules/rendering
@@ -235,6 +236,11 @@ tests/
 - `veritas/resource_parsing.py` owns deterministic extraction, cleanup,
   context capture, and classification of code/data/deployed-resource URLs from
   paper text. Resource availability network checks remain outside this boundary.
+- `veritas/resource_availability.py` owns online availability checks for code,
+  data, and deployed-resource URLs plus namespace-aware resource audit helpers.
+  `veritas.legacy` should wrap these helpers with its globals so historical
+  monkeypatches of `verify_resource_availability` and `_http_request` continue
+  to affect audit behavior.
 - `veritas/resource_reporting.py` owns deterministic resource audit status
   labels and Markdown/HTML report sections.
 - `veritas/followups.py` owns PubPeer/comment and journal-letter language,
