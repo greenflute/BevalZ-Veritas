@@ -4223,18 +4223,15 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                         "resume_dir": str(resume_dir),
                     },
                 )
-                md_path, json_path = save_failed_audit_diagnostics(
+                return save_failed_run_result(
                     failure,
                     input_path,
-                    **failed_artifact_kwargs,
-                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
-                )
-                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-                return RunResult.failed(
-                    failure,
-                    {"markdown": str(md_path), "json": str(json_path)},
-                    workspace=run_workspace,
-                    meta={"input_path": str(input_path)},
+                    run_workspace,
+                    save_failed_audit_diagnostics,
+                    record_run_workspace_artifacts,
+                    completed_stages=completed_stages,
+                    failed_artifact_kwargs=failed_artifact_kwargs,
+                    diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
                 )
             file_content = extract_text_from_file(file_path, max_chars_per_file=None,
                                                   use_mineru=use_mineru,
@@ -4257,18 +4254,15 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                         "resume_dir": str(resume_dir),
                     },
                 )
-                md_path, json_path = save_failed_audit_diagnostics(
+                return save_failed_run_result(
                     failure,
                     input_path,
-                    **failed_artifact_kwargs,
-                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
-                )
-                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-                return RunResult.failed(
-                    failure,
-                    {"markdown": str(md_path), "json": str(json_path)},
-                    workspace=run_workspace,
-                    meta={"input_path": str(input_path)},
+                    run_workspace,
+                    save_failed_audit_diagnostics,
+                    record_run_workspace_artifacts,
+                    completed_stages=completed_stages,
+                    failed_artifact_kwargs=failed_artifact_kwargs,
+                    diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
                 )
             try:
                 rel_path = str(file_path.relative_to(input_path))
@@ -4303,18 +4297,15 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                         "resume_dir": str(resume_dir),
                     },
                 )
-                md_path, json_path = save_failed_audit_diagnostics(
+                return save_failed_run_result(
                     failure,
                     input_path,
-                    **failed_artifact_kwargs,
-                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
-                )
-                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-                return RunResult.failed(
-                    failure,
-                    {"markdown": str(md_path), "json": str(json_path)},
-                    workspace=run_workspace,
-                    meta={"input_path": str(input_path)},
+                    run_workspace,
+                    save_failed_audit_diagnostics,
+                    record_run_workspace_artifacts,
+                    completed_stages=completed_stages,
+                    failed_artifact_kwargs=failed_artifact_kwargs,
+                    diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
                 )
             reference_content = extract_text_from_file(file_path, max_chars_per_file=None,
                                                        use_mineru=use_mineru,
@@ -4330,18 +4321,15 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                     retry_command=retry_command,
                     details={"file": str(file_path), "extension": file_path.suffix.lower(), "resume_dir": str(resume_dir)},
                 )
-                md_path, json_path = save_failed_audit_diagnostics(
+                return save_failed_run_result(
                     failure,
                     input_path,
-                    **failed_artifact_kwargs,
-                    meta={"runtime": run_runtime, "preflight_results": preflight_results},
-                )
-                record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-                return RunResult.failed(
-                    failure,
-                    {"markdown": str(md_path), "json": str(json_path)},
-                    workspace=run_workspace,
-                    meta={"input_path": str(input_path)},
+                    run_workspace,
+                    save_failed_audit_diagnostics,
+                    record_run_workspace_artifacts,
+                    completed_stages=completed_stages,
+                    failed_artifact_kwargs=failed_artifact_kwargs,
+                    diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
                 )
             reference_file_texts.append(reference_content)
         
