@@ -6806,6 +6806,29 @@ def test_report_action_evidence_chain_issues_include_selection_and_limit_results
     assert issues[-1]["item"] == "Evidence cluster 9"
 
 
+def test_report_action_reference_issues_clean_text_and_limit_results():
+    issues = veritas.report_action_context._report_action_reference_issues(
+        {
+            "issues": [
+                {
+                    "index": idx,
+                    "issues": ["missing_doi"],
+                    "text": f"[[EXTRACTION_NOTE]]noise[[/EXTRACTION_NOTE]]\n[[BLOCK type=text]]Smith {idx}. Journal. 2020.[[/BLOCK]]",
+                }
+                for idx in range(10)
+            ]
+        }
+    )
+
+    assert len(issues) == 8
+    assert issues[0]["index"] == 0
+    assert issues[0]["issues"] == ["missing_doi"]
+    assert "Smith 0. Journal. 2020." in issues[0]["text"]
+    assert "EXTRACTION_NOTE" not in issues[0]["text"]
+    assert "[[BLOCK" not in issues[0]["text"]
+    assert issues[-1]["index"] == 7
+
+
 def test_report_action_context_cleans_reference_issue_text():
     context = paper_audit._report_action_context(
         {"summary": "ok", "risk_level": "中", "detection_score": 50, "checks": [], "conclusion": "done"},

@@ -72,6 +72,17 @@ def _report_action_evidence_chain_issues(evidence_chain_audit):
     return issues
 
 
+def _report_action_reference_issues(reference_audit):
+    issues = []
+    for issue in (reference_audit.get("issues") or [])[:8]:
+        issues.append({
+            "index": issue.get("index"),
+            "issues": issue.get("issues", []),
+            "text": _brief_text(_clean_reference_text(issue.get("text", "")), 500),
+        })
+    return issues
+
+
 def _report_action_context(report, pdf_path, meta, stat_result):
     meta = meta or {}
     paper_identity = meta.get("paper_identity") or {}
@@ -84,13 +95,7 @@ def _report_action_context(report, pdf_path, meta, stat_result):
     if evidence_chain_issues:
         issues = evidence_chain_issues + issues
     reference_audit = (meta or {}).get("reference_audit") or {}
-    ref_issues = []
-    for issue in (reference_audit.get("issues") or [])[:8]:
-        ref_issues.append({
-            "index": issue.get("index"),
-            "issues": issue.get("issues", []),
-            "text": _brief_text(_clean_reference_text(issue.get("text", "")), 500),
-        })
+    ref_issues = _report_action_reference_issues(reference_audit)
     image_audit = (meta or {}).get("image_audit") or {}
     image_issues = []
     for img in (image_audit.get("images") or [])[:8]:
