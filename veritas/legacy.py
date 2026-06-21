@@ -147,6 +147,7 @@ from .run_logging import (
     setup_run_logging,
 )
 from . import risk_rules as _risk_rules
+from .markdown_utils import _md_escape_cell
 from .text_utils import _brief_text, _normalize_title, _text_fingerprint, _title_tokens, _token_similarity
 from .models import (
     AuditFailure,
@@ -3583,12 +3584,6 @@ def audit_resources(text, online=True, timeout=10, cache=None):
         "resources": resources[:200],
         "note": "校检论文声明的代码仓库、在线计算器、部署平台等资源是否可访问；URL格式错误会单独标记。",
     }
-
-
-def _md_escape_cell(text):
-    """Markdown表格单元格转义与压缩。"""
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 from .cross_file_consistency import (

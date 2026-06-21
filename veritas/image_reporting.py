@@ -1,9 +1,8 @@
 """Image audit report and review-manifest rendering helpers."""
-
-import re
 from pathlib import Path
 
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .text_utils import _brief_text
 
 DEFAULT_IMAGE_DETECT_URL = "https://imagedetector.com/"
@@ -15,11 +14,6 @@ __all__ = [
     "format_image_audit_markdown",
     "save_image_review_manifest",
 ]
-
-
-def _md_escape_cell(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def _image_semantic_display(item):

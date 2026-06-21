@@ -1,9 +1,8 @@
 """Reference audit Markdown and HTML rendering helpers."""
 
-import re
-
 from .evidence_rendering import _escaped_html_table_fragment_to_html, render_evidence_summary_html
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .reference_parsing import _looks_like_reference_table_noise, build_reference_query
 from .text_utils import _brief_text
 
@@ -17,11 +16,6 @@ __all__ = [
     "format_reference_audit_markdown",
     "format_reference_audit_html",
 ]
-
-
-def _md_escape_cell(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def _reference_online_summary(online):

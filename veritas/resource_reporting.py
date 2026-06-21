@@ -3,6 +3,7 @@
 import re
 
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .text_utils import _brief_text
 
 __all__ = [
@@ -22,11 +23,6 @@ RESOURCE_STATUS_LABELS = {
     "error": "检测异常",
     "skipped": "未检测",
 }
-
-
-def _md_escape_cell(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def _resource_status_text(status):

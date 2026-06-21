@@ -1,8 +1,7 @@
 """Review overview and action-priority report helpers."""
 
-import re
-
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .report_checks import (
     _check_reason,
     _check_sort_key,
@@ -20,11 +19,6 @@ __all__ = [
     "format_review_overview_markdown",
     "format_review_overview_html",
 ]
-
-
-def _md_escape_cell(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def build_audit_action_items(report, meta, stat_result, limit=8):

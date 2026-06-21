@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .evidence_rendering import _clean_mineru_table_block
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .text_utils import _brief_text
 
 __all__ = [
@@ -29,12 +30,6 @@ __all__ = [
     "format_cross_file_consistency_markdown",
     "format_cross_file_consistency_html",
 ]
-
-
-def _md_escape_cell(text):
-    """Markdown table cell escaping for cross-file report rows."""
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def _cross_file_source_label(category):

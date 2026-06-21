@@ -12,6 +12,7 @@ from .cross_file_consistency import (
     _extract_cross_file_sample_records,
 )
 from .html_utils import _html_escape
+from .markdown_utils import _md_escape_cell
 from .report_checks import (
     _check_reason,
     _check_sort_key,
@@ -74,11 +75,6 @@ _EVIDENCE_SUPPORT_HINT_RE = re.compile(
     r"\b(?:p\s*[<=>]|n\s*[=:：]|\d+\s+(?:patients?|subjects?|participants?|samples?|mice|cells|cases)|fig(?:ure)?|table)\b|图\s*\d+|表\s*\d+",
     re.I,
 )
-
-
-def _md_escape_cell(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    return text.replace("|", "\\|")
 
 
 def _evidence_section_name(raw):
