@@ -70,6 +70,7 @@ veritas/
 ├── risk_rule_helpers.py # Shared risk scoring/merge helpers for rules/rendering
 ├── risk_rules.py       # Versioned final risk scoring boundary
 ├── run.py              # Run request/result and orchestration boundary
+├── run_failures.py     # Failed run artifact recording and RunResult helpers
 ├── run_logging.py      # Run log, progress, resume-event, and MinerU artifact helpers
 ├── text_extraction.py  # Local standard-library text extraction fallbacks
 ├── text_utils.py       # Shared text shortening and token similarity helpers
@@ -351,6 +352,10 @@ tests/
 - `veritas/run.py` exposes the run orchestration boundary without requiring
   callers to import the legacy module directly; the legacy run engine is loaded
   only when `run_audit(...)` is called.
+- `veritas/run_failures.py` owns failed-run artifact/result helpers that save
+  failed diagnostics through injected functions, record failed workspace
+  artifacts, and build `RunResult.failed` payloads. Keep this boundary
+  orchestration-local and provider-free.
 - `veritas/run_logging.py` owns local run-output helpers: output base
   selection, tee logging, resume event JSONL writes, progress printing, LLM
   cache-read policy, run-summary input/route/scope helpers, workspace input and

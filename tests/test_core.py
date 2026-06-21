@@ -758,6 +758,69 @@ def test_record_preflight_result_persists_workspace_and_resume_event(tmp_path):
     ]
 
 
+def test_save_failed_run_result_records_artifacts_and_result_meta(tmp_path):
+    failure = paper_audit.AuditFailure(
+        capability="mineru",
+        error_class="provider_unavailable",
+        message="down",
+        completed_stages=["init"],
+        retry_command="python paper_audit.py paper.pdf",
+    )
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("pdf", encoding="utf-8")
+    saved_calls = []
+    recorded_calls = []
+
+    def fake_save_failed(failure_arg, input_arg, **kwargs):
+        saved_calls.append((failure_arg, input_arg, kwargs))
+        return tmp_path / "paper.failed.md", tmp_path / "paper.failed.json"
+
+    def fake_record_artifacts(workspace, artifact_type, paths, meta=None):
+        recorded_calls.append((workspace, artifact_type, paths, meta))
+
+    result = paper_audit.save_failed_run_result(
+        failure,
+        input_path,
+        {"run_dir": str(tmp_path / "run")},
+        fake_save_failed,
+        fake_record_artifacts,
+        completed_stages=["init"],
+        failed_artifact_kwargs={"output_dir": tmp_path, "output_stem": "paper"},
+        diagnostics_meta={"preflight_results": [{"ok": False}]},
+        workspace_meta={"preflight_results": [{"ok": False}]},
+        result_meta={"preflight_results": [{"ok": False}]},
+    )
+
+    assert saved_calls == [
+        (
+            failure,
+            input_path,
+            {
+                "output_dir": tmp_path,
+                "output_stem": "paper",
+                "meta": {"preflight_results": [{"ok": False}]},
+            },
+        )
+    ]
+    assert recorded_calls == [
+        (
+            {"run_dir": str(tmp_path / "run")},
+            "failed",
+            [tmp_path / "paper.failed.md", tmp_path / "paper.failed.json"],
+            {"completed_stages": ["init"], "preflight_results": [{"ok": False}]},
+        )
+    ]
+    assert result.outcome == "failed"
+    assert result.artifact_paths == {
+        "markdown": str(tmp_path / "paper.failed.md"),
+        "json": str(tmp_path / "paper.failed.json"),
+    }
+    assert result.meta == {
+        "input_path": str(input_path),
+        "preflight_results": [{"ok": False}],
+    }
+
+
 def test_run_audit_accepts_direct_docx_file_input(monkeypatch, tmp_path):
     docx_path = tmp_path / "paper.docx"
     docx_path.write_bytes(b"fake-docx")
@@ -1110,6 +1173,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.risk_rules.apply_risk_rules is paper_audit.apply_risk_rules
     assert veritas.risk_rules.merge_chunk_reports is paper_audit.merge_chunk_reports
     assert veritas.risk_rules.RISK_RULE_VERSION == paper_audit.RISK_RULE_VERSION
+    assert veritas.run_failures.save_failed_run_result is paper_audit.save_failed_run_result
     assert veritas.run_logging.get_output_base is paper_audit.get_output_base
     assert veritas.run_logging.setup_run_logging is paper_audit.setup_run_logging
     assert veritas.run_logging.get_resume_dir is paper_audit.get_resume_dir

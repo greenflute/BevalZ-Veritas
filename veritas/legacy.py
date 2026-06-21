@@ -173,6 +173,7 @@ from .run_logging import (
     save_mineru_artifacts,
     setup_run_logging,
 )
+from .run_failures import save_failed_run_result
 from . import risk_rules as _risk_rules
 from .markdown_utils import _md_escape_cell
 from .text_utils import _brief_text, _normalize_title, _text_fingerprint, _title_tokens, _token_similarity
@@ -4134,25 +4135,23 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
                 retry_command,
                 completed_stages,
             )
-            md_path, json_path = save_failed_audit_diagnostics(
+            failed_result = save_failed_run_result(
                 failure,
                 input_path,
-                **failed_artifact_kwargs,
-                meta={"preflight_results": preflight_results},
-            )
-            record_run_workspace_artifacts(
                 run_workspace,
-                "failed",
-                [md_path, json_path],
-                meta={"preflight_results": preflight_results, "completed_stages": completed_stages},
+                save_failed_audit_diagnostics,
+                record_run_workspace_artifacts,
+                completed_stages=completed_stages,
+                failed_artifact_kwargs=failed_artifact_kwargs,
+                diagnostics_meta={"preflight_results": preflight_results},
+                workspace_meta={"preflight_results": preflight_results},
+                result_meta={"preflight_results": preflight_results},
             )
-            print(f"❌ MinerU预检失败，未生成完整审查报告。失败诊断已保存: {md_path}, {json_path}")
-            return RunResult.failed(
-                failure,
-                {"markdown": str(md_path), "json": str(json_path)},
-                workspace=run_workspace,
-                meta={"input_path": str(input_path), "preflight_results": preflight_results},
+            print(
+                "❌ MinerU预检失败，未生成完整审查报告。失败诊断已保存: "
+                f"{failed_result.artifact_paths['markdown']}, {failed_result.artifact_paths['json']}"
             )
+            return failed_result
         completed_stages.append("mineru_preflight")
     progress_bar(0, 5, "初始化完成")
 
