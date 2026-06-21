@@ -2894,20 +2894,7 @@ def _run_single_llm_review(audit_text, llm_cache_dir, allow_llm_cache_read, allo
     return report
 
 
-
-def run_audit(run_request: RunRequest, args=None) -> RunResult:
-    args = args if args is not None else run_request.to_args()
-    input_path = run_request.input_path
-    if not input_path.exists():
-        print(f"❌ 路径不存在: {input_path}")
-        failure = AuditFailure(
-            capability="input",
-            error_class="input_path_not_found",
-            message=f"路径不存在: {input_path}",
-            retry_command=retry_command_from_args(args, input_path),
-        )
-        return RunResult.failed(failure, {}, meta={"input_path": str(input_path)})
-
+def _prepare_run_audit_context(input_path, args):
     output_dir, output_stem = get_output_base(input_path)
     setup_run_logging(input_path)
     print(f"📁 所有输出将保存到: {output_dir}")
@@ -2966,6 +2953,47 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
             IMAGE_SEMANTIC_CACHE_VERSION,
         ),
     )
+    return {
+        "output_dir": output_dir,
+        "output_stem": output_stem,
+        "resume_dir": resume_dir,
+        "retry_command": retry_command,
+        "failed_artifact_kwargs": failed_artifact_kwargs,
+        "run_runtime": run_runtime,
+        "run_workspace": run_workspace,
+        "allow_llm_cache_read": allow_llm_cache_read,
+        "allow_llm_cache_write": allow_llm_cache_write,
+        "has_pdf_input": has_pdf_input,
+        "use_mineru_default": use_mineru_default,
+    }
+
+
+
+def run_audit(run_request: RunRequest, args=None) -> RunResult:
+    args = args if args is not None else run_request.to_args()
+    input_path = run_request.input_path
+    if not input_path.exists():
+        print(f"❌ 路径不存在: {input_path}")
+        failure = AuditFailure(
+            capability="input",
+            error_class="input_path_not_found",
+            message=f"路径不存在: {input_path}",
+            retry_command=retry_command_from_args(args, input_path),
+        )
+        return RunResult.failed(failure, {}, meta={"input_path": str(input_path)})
+
+    context = _prepare_run_audit_context(input_path, args)
+    output_dir = context["output_dir"]
+    output_stem = context["output_stem"]
+    resume_dir = context["resume_dir"]
+    retry_command = context["retry_command"]
+    failed_artifact_kwargs = context["failed_artifact_kwargs"]
+    run_runtime = context["run_runtime"]
+    run_workspace = context["run_workspace"]
+    allow_llm_cache_read = context["allow_llm_cache_read"]
+    allow_llm_cache_write = context["allow_llm_cache_write"]
+    has_pdf_input = context["has_pdf_input"]
+    use_mineru_default = context["use_mineru_default"]
     completed_stages = ["init", "runtime_config_loaded"]
     preflight_state = {}
     preflight_results = []
