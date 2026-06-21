@@ -3581,6 +3581,46 @@ def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default
     }
 
 
+def _finalize_run_audit_result(input_path, args, report, meta, stat_result, reference_audit, resource_audit, run_workspace, resume_dir, has_pdf_input):
+    progress_bar(4, 5, "阶段5/5 开始生成报告")
+    limited_reasons = audit_limited_reasons(args, meta, has_pdf_input=has_pdf_input)
+    apply_audit_artifact_type(meta, limited_reasons)
+    report_actions_port = int(getattr(args, "report_actions_port", 8765) or 8765)
+    meta["report_actions"] = {
+        "host": "127.0.0.1",
+        "port": report_actions_port,
+        "url": report_action_service_url("127.0.0.1", report_actions_port),
+        "auto_start": not bool(getattr(args, "no_open", False)),
+    }
+    output_path, html_output_path, json_path = _write_run_report_artifacts(
+        input_path,
+        args,
+        report,
+        meta,
+        stat_result,
+        reference_audit,
+        resource_audit,
+        run_workspace,
+        resume_dir,
+    )
+
+    resume_event(resume_dir, "all", "done", "audit completed")
+    progress_bar(5, 5, "阶段5/5 全部完成")
+    print(f"🧾 完整日志: {_run_logging._RUN_LOG_FILE}")
+
+    _handle_run_report_opening(args, html_output_path, report_actions_port, run_workspace, meta)
+
+    if not report.get("parse_error"):
+        risk = report.get("risk_level", "未知")
+        print(f"\n📊 复核优先级: {risk} | 总评: {report.get('summary', 'N/A')}")
+
+    artifact_paths = {"markdown": str(output_path), "html": str(html_output_path)}
+    if json_path.exists():
+        artifact_paths["json"] = str(json_path)
+    result_factory = RunResult.limited if meta.get("artifact_type") == "limited" else RunResult.complete
+    return result_factory(artifact_paths, workspace=run_workspace, meta=meta)
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3764,17 +3804,7 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     )
 
     # ─── 阶段5：生成报告 ───
-    progress_bar(4, 5, "阶段5/5 开始生成报告")
-    limited_reasons = audit_limited_reasons(args, meta, has_pdf_input=has_pdf_input)
-    apply_audit_artifact_type(meta, limited_reasons)
-    report_actions_port = int(getattr(args, "report_actions_port", 8765) or 8765)
-    meta["report_actions"] = {
-        "host": "127.0.0.1",
-        "port": report_actions_port,
-        "url": report_action_service_url("127.0.0.1", report_actions_port),
-        "auto_start": not bool(getattr(args, "no_open", False)),
-    }
-    output_path, html_output_path, json_path = _write_run_report_artifacts(
+    return _finalize_run_audit_result(
         input_path,
         args,
         report,
@@ -3784,24 +3814,8 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         resource_audit,
         run_workspace,
         resume_dir,
+        has_pdf_input,
     )
-
-    resume_event(resume_dir, "all", "done", "audit completed")
-    progress_bar(5, 5, "阶段5/5 全部完成")
-    print(f"🧾 完整日志: {_run_logging._RUN_LOG_FILE}")
-
-    _handle_run_report_opening(args, html_output_path, report_actions_port, run_workspace, meta)
-
-    # 打印摘要
-    if not report.get("parse_error"):
-        risk = report.get("risk_level", "未知")
-        print(f"\n📊 复核优先级: {risk} | 总评: {report.get('summary', 'N/A')}")
-
-    artifact_paths = {"markdown": str(output_path), "html": str(html_output_path)}
-    if json_path.exists():
-        artifact_paths["json"] = str(json_path)
-    result_factory = RunResult.limited if meta.get("artifact_type") == "limited" else RunResult.complete
-    return result_factory(artifact_paths, workspace=run_workspace, meta=meta)
 
 
 def _add_main_parser_arguments(parser):
