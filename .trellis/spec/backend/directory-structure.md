@@ -59,6 +59,7 @@ veritas/
 ├── report_action_panel.py # HTML follow-up/report action panel rendering helpers
 ├── report_action_service.py # Local report action service health/startup helpers
 ├── report_checks.py    # Deterministic LLM finding scoring/display helpers
+├── report_html_fragments.py # Small HTML report status fragment builders
 ├── report_html_sections.py # HTML report LLM check section builders
 ├── report_markdown.py  # Top-level Markdown report composition
 ├── review_overview.py  # Review overview and action-priority rendering helpers
@@ -271,6 +272,11 @@ tests/
   source tags, source/reason extraction, merged-finding summary HTML, and check
   sort/verdict helpers shared by report rendering and evidence-chain clustering.
   It must remain provider-free and must not call text LLMs or external services.
+- `veritas/report_html_fragments.py` owns small top-level HTML report status
+  fragments such as limited notices, chunk metadata, number-consistency rows,
+  LLM coverage banners, and score breakdown text. It should stay
+  namespace-aware while compatibility wrappers live in `veritas.legacy`, so
+  tests and user scripts can still monkeypatch HTML escaping.
 - `veritas/report_html_sections.py` owns HTML report sections derived from LLM
   checks: parse-error output, top suspicious evidence cards, all-checks table,
   per-finding detail cards, and conclusion text. It should stay

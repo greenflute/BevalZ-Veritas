@@ -285,6 +285,7 @@ from .report_checks import (
     _merged_group_summary_text,
     _sanitize_reason_text,
 )
+from .report_html_fragments import build_html_status_fragments_from_namespace
 from .report_html_sections import format_html_check_sections_from_namespace
 from .report_markdown import format_report_from_namespace
 from .report_action_context import _report_action_context
@@ -2890,13 +2891,6 @@ def format_html_report(report, pdf_path, meta, stat_result):
     artifact_badge = "范围受限 limited" if artifact_type == "limited" else "完整审查 complete"
     artifact_color = "#8a5a00" if artifact_type == "limited" else "#166534"
     runtime = meta.get("runtime") or {}
-    limited_notice = ""
-    if meta.get("limited_reasons"):
-        limited_notice = f"""
-  <div class="section coverage-warning">
-    <h2>范围受限审查</h2>
-    <p>{_html_escape('；'.join(meta.get('limited_reasons') or []))}</p>
-  </div>"""
 
     # 统计检测状态
     benford_val = round(stat_result['benford_deviation'], 3) if stat_result['benford_deviation'] else '样本不足'
@@ -2904,43 +2898,12 @@ def format_html_report(report, pdf_path, meta, stat_result):
     p_abnormal = stat_result['p_value_abnormal']
     p_status_class = "status-warn" if p_abnormal else "status-ok"
 
-    # 分块信息
-    chunk_info = ""
-    if meta.get("chunk_count") and meta["chunk_count"] > 1:
-        chunk_info = f"""
-        <div class="meta-item">
-            <span>审查方式</span>
-            <strong>分块审查 · {meta['chunk_count']}块 · 单块{meta['chunk_size']}字符 · 重叠{meta['overlap']}字符</strong>
-        </div>"""
-
-    # 数字自洽性
-    number_consistency = ""
-    if stat_result.get("number_consistency"):
-        number_consistency = f"""
-        <tr>
-            <td>数字自洽性</td>
-            <td>{stat_result['number_consistency']}</td>
-            <td><span class="status-warn">⚠️ 矛盾</span></td>
-        </tr>"""
-
-    # LLM覆盖率/部分报告提示
-    coverage_banner = ""
-    if meta.get("llm_coverage"):
-        failed_chunks = meta.get("llm_failed_chunks") or []
-        if meta.get("llm_partial_report") or failed_chunks:
-            coverage_banner = f"""
-  <div class="section coverage-warning">
-    <h2>LLM覆盖不足</h2>
-    <p><strong>成功审查分块</strong>: {_html_escape(meta.get('llm_coverage'))}</p>
-    <p><strong>失败块</strong>: {_html_escape(failed_chunks or '无')}</p>
-    <p>本报告只基于成功返回的LLM分块合并，未覆盖失败分块全文；结论只能作为阶段性结果。建议稍后使用 <code>--llm-cache-only</code> 复用成功缓存，或切换更稳定API补跑。</p>
-  </div>"""
-        else:
-            coverage_banner = f"""
-  <div class="section coverage-ok">
-    <h2>LLM覆盖率</h2>
-    <p>{_html_escape(meta.get('llm_coverage'))} 个分块全部成功。</p>
-  </div>"""
+    status_fragments = build_html_status_fragments_from_namespace(globals(), report, meta, stat_result)
+    limited_notice = status_fragments["limited_notice"]
+    chunk_info = status_fragments["chunk_info"]
+    number_consistency = status_fragments["number_consistency"]
+    coverage_banner = status_fragments["coverage_banner"]
+    score_breakdown_html = status_fragments["score_breakdown_html"]
     action_summary_html = format_audit_action_summary_html(report, meta, stat_result) if not report.get("parse_error") else ""
     review_overview_html = format_review_overview_html(report, meta, stat_result) if not report.get("parse_error") else ""
     resource_audit_html = format_resource_audit_html(meta.get("resource_audit"))
@@ -2949,13 +2912,6 @@ def format_html_report(report, pdf_path, meta, stat_result):
     cross_file_audit_html = format_cross_file_consistency_html(meta.get("cross_file_consistency_audit"))
     evidence_chain_audit_html = format_evidence_chain_audit_html(meta.get("evidence_chain_audit"))
     web_action_panel_html = format_web_action_panel_html(report, pdf_path, meta, stat_result) if not report.get("parse_error") else ""
-    breakdown = report.get("score_breakdown") or {}
-    score_breakdown_html = ""
-    if breakdown:
-        score_breakdown_html = f"""
-      <div class="score-breakdown">
-        红旗 {breakdown.get('red_flags', 0)} · 证据型疑点 {breakdown.get('evidence_warnings', 0)} · 提取质量疑点 {breakdown.get('extraction_warnings', 0)} · 统计调整 {_html_escape(', '.join(breakdown.get('stat_adjustments') or []) or '无')}
-      </div>"""
     summary_text = _html_escape(report.get('summary', 'N/A'))
     extracted_chars = meta.get('total_chars', meta.get('chars', 'N/A'))
     extraction_method = meta.get('extraction_method', meta.get('source', 'N/A'))
