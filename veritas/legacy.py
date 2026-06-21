@@ -285,6 +285,7 @@ from .report_checks import (
     _merged_group_summary_text,
     _sanitize_reason_text,
 )
+from .report_html_sections import format_html_check_sections_from_namespace
 from .report_markdown import format_report_from_namespace
 from .report_action_context import _report_action_context
 from .report_action_panel import format_web_action_panel_html, report_action_service_url
@@ -2959,114 +2960,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
     extracted_chars = meta.get('total_chars', meta.get('chars', 'N/A'))
     extraction_method = meta.get('extraction_method', meta.get('source', 'N/A'))
 
-    # 解析失败
-    if report.get("parse_error"):
-        checks_html = f"""
-        <div class="section">
-            <h2>LLM报告解析失败（原始输出）</h2>
-            <pre class="error-block">{_html_escape(report.get('raw_output', ''))}</pre>
-        </div>"""
-        conclusion_html = ""
-    else:
-        # 可疑点证据汇总表 + 全部检查概览 + 详细分析
-        checks = sorted(report.get("checks", []), key=_check_sort_key)
-        suspicious = [c for c in checks if _is_suspicious_check(c)]
-
-        suspicious_items = ""
-        for i, c in enumerate(suspicious[:5], 1):
-            verdict = c.get('verdict', 'N/A')
-            verdict_class = _check_verdict_class(verdict)
-            cat_item = f"{c.get('category', 'N/A')} / {c.get('item', 'N/A')}"
-            source = _check_source_text(c)
-            reason = _check_reason(c)
-            brief = _brief_text(reason or source or "未提供详细原因", 120)
-            suspicion_score = _check_suspicion_score(c)
-            source_tags = " + ".join(_check_source_tags(c))
-            merged_html = _merged_group_html(c)
-            suspicious_items += f"""
-            <details class="suspicion-card" id="suspicious-finding-{i}">
-                <summary class="suspicion-summary">
-                    <span class="suspicion-rank">#{i}</span>
-                    <span class="{verdict_class} suspicion-verdict">{_html_escape(verdict)}</span>
-                    <span class="suspicion-title">{_html_escape(cat_item)}</span>
-                    <span class="suspicion-score">复核分 {suspicion_score}</span>
-                    <span class="suspicion-brief"><strong>{_html_escape(source_tags)}</strong> · {_html_escape(brief)}</span>
-                    <span class="summary-action">查看详情</span>
-                </summary>
-                <div class="suspicion-body">
-                    {merged_html}
-                    <div class="detail-evidence"><strong>原文/证据摘录</strong>{render_evidence_html(source or 'LLM未提供明确原文摘录，请人工回查对应段落。')}</div>
-                    <div class="detail-text"><strong>可疑原因/详细说明</strong><p>{_html_escape(reason or 'LLM未提供详细说明。')}</p></div>
-                </div>
-            </details>"""
-        if len(suspicious) > 5:
-            suspicious_items += f'<div class="muted">仅显示 Top 5；完整 {len(suspicious)} 条见下方全部检查项。</div>'
-        if not suspicious_items:
-            suspicious_items = '<div class="muted">未发现红旗/疑点项；仍建议人工核验关键数据、图表和引用。</div>'
-
-        checks_table_rows = ""
-        for i, c in enumerate(checks, 1):
-            verdict = c.get('verdict', 'N/A')
-            verdict_class = _check_verdict_class(verdict)
-            checks_table_rows += f"""
-            <tr>
-                <td>{i}</td>
-                <td>{_html_escape(c.get('category', 'N/A'))}</td>
-                <td>{_html_escape(c.get('item', 'N/A'))}</td>
-                <td><span class="{verdict_class}">{_html_escape(verdict)}</span></td>
-                <td class="evidence-cell">{render_evidence_summary_html(_check_source_text(c), 120)}</td>
-            </tr>"""
-
-        detail_cards = ""
-        for i, c in enumerate(checks, 1):
-            verdict = c.get('verdict', 'N/A')
-            verdict_class = _check_verdict_class(verdict)
-            source = _check_source_text(c)
-            reason = _check_reason(c)
-            source_html = render_evidence_html(source or 'LLM未提供明确原文摘录，请人工回查对应段落。')
-            merged_html = _merged_group_html(c)
-            detail_cards += f"""
-            <details class="detail-card" id="check-{i}">
-                <summary class="detail-header detail-summary">
-                    <span class="detail-num">#{i}</span>
-                    <span class="detail-cat">{_html_escape(c.get('category', 'N/A'))}</span>
-                    <span class="detail-item">{_html_escape(c.get('item', 'N/A'))}</span>
-                    <span class="{verdict_class} detail-verdict">{_html_escape(verdict)}</span>
-                    <span class="detail-brief">{_html_escape(_brief_text(reason or source or '无摘要', 120))}</span>
-                    <span class="summary-action">查看详情</span>
-                </summary>
-                <div class="detail-body">
-                    {merged_html}
-                    <div class="detail-evidence"><strong>原文/证据摘录</strong>{source_html}</div>
-                    <div class="detail-text"><strong>可疑原因/详细说明</strong><p>{_html_escape(reason or 'LLM未提供详细说明。')}</p></div>
-                </div>
-            </details>"""
-
-        checks_html = f"""
-        <div class="section evidence-summary" id="suspicious-findings">
-            <h2>Top 可复核证据</h2>
-            <p class="section-hint">按可复核性和证据强度排序；默认显示前5项，展开后查看原文证据、判断理由和相近疑点统合来源。</p>
-            <div class="suspicion-list">{suspicious_items}</div>
-        </div>
-        <div class="section" id="all-checks">
-            <h2>全部检查项概览</h2>
-            <table class="checks-table">
-                <thead><tr><th>#</th><th>分类</th><th>检查项</th><th>判定</th><th>证据摘要</th></tr></thead>
-                <tbody>{checks_table_rows}</tbody>
-            </table>
-        </div>
-        <div class="section" id="finding-details">
-            <h2>逐条详细分析（含原文支撑）</h2>
-            {detail_cards}
-        </div>"""
-
-        conclusion_html = ""
-        if report.get("conclusion"):
-            conclusion_html = f"""
-            <div class="section conclusion-section">
-                <h2>综合结论</h2>
-                <p class="conclusion-text">{_html_escape(report['conclusion'])}</p>
-            </div>"""
+    checks_html, conclusion_html = format_html_check_sections_from_namespace(globals(), report)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
