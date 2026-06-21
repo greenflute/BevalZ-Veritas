@@ -214,48 +214,89 @@ python paper_audit.py Test_paper -o full_risk_from_scratch --json
 
 ## 📖 完整用法
 ```
-usage: paper_audit.py [-h] [--mineru]
+usage: paper_audit.py [-h] [--serve-report-actions]
+                      [--report-actions-port REPORT_ACTIONS_PORT]
+                      [--serve-web] [--gui] [--web-port WEB_PORT]
+                      [--update-patterns COMMENTS_FILE] [--mineru]
                       [--mineru-model {pipeline,vlm,MinerU-HTML}]
                       [--mineru-lang MINERU_LANG] [--no-mineru]
                       [--max-chars MAX_CHARS] [--output OUTPUT] [--json]
-                      [--serve-report-actions]
-                      [--report-actions-port REPORT_ACTIONS_PORT]
-                      pdf_path
+                      [--ai-detect] [--image-detect]
+                      [--image-audit-limit IMAGE_AUDIT_LIMIT]
+                      [--no-image-semantic]
+                      [--image-semantic-limit IMAGE_SEMANTIC_LIMIT]
+                      [--image-semantic-timeout IMAGE_SEMANTIC_TIMEOUT]
+                      [--no-image-detector]
+                      [--image-detector-limit IMAGE_DETECTOR_LIMIT]
+                      [--image-detector-timeout IMAGE_DETECTOR_TIMEOUT]
+                      [--no-reference-online]
+                      [--reference-online-limit REFERENCE_ONLINE_LIMIT]
+                      [--reference-timeout REFERENCE_TIMEOUT]
+                      [--no-resource-online]
+                      [--resource-timeout RESOURCE_TIMEOUT] [--no-resume]
+                      [--fresh] [--llm-timeout LLM_TIMEOUT]
+                      [--llm-retries LLM_RETRIES] [--strict-failed-chunks]
+                      [--llm-cache-only] [--no-open]
+                      [pdf_path]
 
 positional arguments:
-  pdf_path              待审查的文件路径或论文目录路径（支持PDF、Word .docx、Excel、Supplement等）
+  pdf_path              待审查的文件路径或论文目录路径（更新/服务模式下无需提供）
 
 options:
   -h, --help            show this help message and exit
   --serve-report-actions
                         启动本机HTML报告动作服务：一键生成PubPeer comment和期刊letter
-  --report-actions-port
+  --report-actions-port REPORT_ACTIONS_PORT
                         HTML报告动作服务端口（默认8765，仅监听127.0.0.1）
-  --mineru              使用MinerU API将PDF转为Markdown再审查（PDF默认启用）
-  --mineru-model        MinerU模型版本（默认vlm，仅Precision API生效）
-  --mineru-lang         MinerU OCR语言（默认ch=中英，en=英文，japan=日文）
+  --serve-web           启动本机Web Runner工作台：通过浏览器运行审查、查看日志和打开产物
+  --gui                 启动本机桌面GUI软件：选择输入、运行审查并直接打开报告产物
+  --web-port WEB_PORT   Web Runner端口（默认8765，仅监听127.0.0.1）
+  --update-patterns COMMENTS_FILE
+                        从PubPeer评论文本文件中自动提取新的欺诈模式，更新知识库
+  --mineru              使用MinerU API将PDF转为Markdown再审查（PDF默认已启用，保留该参数用于兼容旧命令）
+  --mineru-model {pipeline,vlm,MinerU-HTML}
+                        MinerU模型版本（默认vlm，仅Precision API生效）
+  --mineru-lang MINERU_LANG
+                        MinerU OCR语言（默认ch=中英，en=英文，japan=日文）
   --no-mineru           调试/范围受限：禁用MinerU；不能作为完整正式审查
-  --max-chars           单块最大字符数（默认4096，超过4096会自动压到4096）
-  --output, -o          输出报告文件路径（默认输出到同目录）
+  --max-chars MAX_CHARS
+                        LLM分块单块最大字符数（默认4096；超过4096会自动压到4096）
+  --output OUTPUT, -o OUTPUT
+                        输出报告文件路径（默认输出到同目录）
   --json                同时保存原始JSON结果
+  --ai-detect           开启腾讯朱雀AI文本检测：自动复制文本到剪贴板+打开检测页面
+  --image-detect        兼容旧参数：图片检测已默认自动执行，不再打开网页或要求手动上传
+  --image-audit-limit IMAGE_AUDIT_LIMIT
+                        报告中纳入图像合理性检测的图片数量上限（默认全部；设置后为范围受限审查）
+  --no-image-semantic   调试/范围受限：关闭图像语义分析；存在可检测图片时不能作为完整正式审查
+  --image-semantic-limit IMAGE_SEMANTIC_LIMIT
+                        调用图像语义分析的图片数量上限（默认全部；设置后为范围受限审查）
+  --image-semantic-timeout IMAGE_SEMANTIC_TIMEOUT
+                        单张图片图像语义分析请求超时时间秒数（默认45）
+  --no-image-detector   调试/范围受限：关闭imagedetector.com自动图片AI概率检测；存在可检测图片时不能作为完整正式审查
+  --image-detector-limit IMAGE_DETECTOR_LIMIT
+                        自动调用imagedetector.com检测的图片数量上限（默认全部；设置后为范围受限审查）
+  --image-detector-timeout IMAGE_DETECTOR_TIMEOUT
+                        单张图片imagedetector自动检测超时时间秒数（默认60）
+  --no-reference-online
+                        调试/范围受限：关闭参考文献在线真实性检索；识别到参考文献时不能作为完整正式审查
+  --reference-online-limit REFERENCE_ONLINE_LIMIT
+                        参考文献在线检索条数上限（默认全部；设置后为范围受限审查）
+  --reference-timeout REFERENCE_TIMEOUT
+                        单个参考文献外部检索源超时时间秒数（默认10）
+  --no-resource-online  调试/范围受限：关闭代码仓库与在线资源可用性校检；识别到资源时不能作为完整正式审查
+  --resource-timeout RESOURCE_TIMEOUT
+                        单个代码仓库/在线资源可用性请求超时时间秒数（默认10）
   --no-resume           禁用断点续作缓存，强制重新提取文本和重新LLM审查
   --fresh               运行前清空本输入的断点续作缓存，然后重新开始；默认不清空缓存并自动续跑
+  --llm-timeout LLM_TIMEOUT
+                        单次LLM请求超时时间秒数（默认45；不稳定网关可调小以更快跳过）
+  --llm-retries LLM_RETRIES
+                        每次LLM调用内部重试次数（默认1，即最多2次尝试）
+  --strict-failed-chunks
+                        严格模式：失败块首轮+补跑仍失败时停止生成报告
+  --llm-cache-only      调试/范围受限：只复用已有成功LLM分块缓存，不再调用API；不能作为完整正式审查
   --no-open             生成报告后不自动打开HTML报告，适合CI、服务器和批处理环境
-  --reference-online-limit
-                        参考文献在线检索条数上限，默认全部；设置后为范围受限审查
-  --no-reference-online
-                        调试/范围受限：关闭参考文献在线检索；识别到参考文献时不能作为完整正式审查
-  --no-resource-online  调试/范围受限：关闭代码仓库与在线资源可用性校检；识别到资源时不能作为完整正式审查
-  --image-audit-limit   报告中纳入图片检测的数量上限，默认30
-  --image-semantic-limit
-                        图像语义分析数量上限，默认全部；设置后为范围受限审查
-  --no-image-semantic   调试/范围受限：关闭图像语义分析；存在可检测图片时不能作为完整正式审查
-  --image-detector-limit
-                        自动调用imagedetector.com检测的图片数量上限，默认全部；设置后为范围受限审查
-  --image-detector-timeout
-                        单张图片imagedetector自动检测超时时间秒数，默认60
-  --no-image-detector   调试/范围受限：关闭imagedetector.com自动图片AI概率检测；存在可检测图片时不能作为完整正式审查
-  --image-detect        兼容旧流程：打开图像复核清单
 ```
 
 ---
