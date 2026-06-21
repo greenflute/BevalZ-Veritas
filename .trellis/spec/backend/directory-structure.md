@@ -31,6 +31,7 @@ veritas/
 ├── image_cache.py      # Image audit cache key and fingerprint helpers
 ├── image_reporting.py  # Image audit report and review-manifest rendering helpers
 ├── image_results.py    # Image provider response normalization helpers
+├── image_selection.py  # Image audit selection and cache-flush helpers
 ├── local_analysis.py   # Local statistics and text chunking helpers
 ├── mineru_text.py      # MinerU structured content-list text formatting helpers
 ├── models.py           # Stable dataclass/report models and model conversion
@@ -123,6 +124,9 @@ tests/
 - `veritas/image_results.py` owns deterministic normalization of image semantic
   model responses, imagedetector responses, provider timeout result payloads,
   and JSON-object extraction from model text. It must not perform network I/O.
+- `veritas/image_selection.py` owns deterministic image audit sorting,
+  semantic/detector priority keys, and cache flush callback handling. It must
+  not collect images or call providers.
 - `veritas/evidence_rendering.py` owns deterministic evidence excerpt cleanup,
   MinerU table marker removal, Markdown/HTML table parsing, data-table HTML
   rendering, and compact evidence summary HTML. It must remain provider-free
