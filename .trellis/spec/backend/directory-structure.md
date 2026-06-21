@@ -30,6 +30,7 @@ veritas/
 ├── failed_diagnostics.py # Stable failed-audit payload, rendering, and conversion helpers
 ├── followups.py       # PubPeer/comment and journal-letter draft workflow helpers
 ├── html_utils.py       # HTML escaping and script-safe JSON helpers
+├── http_client.py      # Shared low-level HTTP request helper
 ├── image_cache.py      # Image audit cache key and fingerprint helpers
 ├── image_collection.py # Local image discovery and MinerU zip image extraction helpers
 ├── image_reporting.py  # Image audit report and review-manifest rendering helpers
@@ -130,6 +131,10 @@ tests/
 - `veritas/html_utils.py` owns HTML escaping and script-safe JSON helpers used
   by renderers; these remain re-exported through `paper_audit` for
   compatibility while renderer extraction continues.
+- `veritas/http_client.py` owns the shared low-level HTTP request helper and
+  default browser-like user agent. Provider-specific request construction,
+  polling, retry behavior, and response interpretation remain outside this
+  boundary.
 - `veritas/image_cache.py` owns deterministic image file fingerprints and image
   semantic cache key construction. Namespace-aware helpers let `veritas.legacy`
   preserve historical monkeypatch behavior for image semantic endpoint, model,

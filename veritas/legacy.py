@@ -67,6 +67,7 @@ from .followups import (
     save_followup_artifacts_from_namespace,
 )
 from .html_utils import _html_escape, _json_for_script_tag
+from .http_client import _http_request
 from .image_cache import _image_file_fingerprint_from_namespace, _image_semantic_cache_key_from_namespace
 from .image_collection import (
     _dedupe_paths,
@@ -570,22 +571,6 @@ SYSTEM_PROMPT = SYSTEM_PROMPT_TPL.format(pattern_hints=PATTERN_HINTS)
 # ══════════════════════════════════════════════════════════════
 # MinerU API 模块 — PDF转Markdown
 # ══════════════════════════════════════════════════════════════
-
-def _http_request(url, method="GET", headers=None, data=None, timeout=60):
-    """通用HTTP请求封装（使用requests，绕过Cloudflare UA检测）"""
-    _BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    if headers is None:
-        headers = {}
-    headers.setdefault("User-Agent", _BROWSER_UA)
-    if method.upper() == "GET":
-        resp = requests.get(url, headers=headers, timeout=timeout)
-    elif method.upper() == "POST":
-        resp = requests.post(url, headers=headers, data=data, timeout=timeout)
-    else:
-        resp = requests.request(method, url, headers=headers, data=data, timeout=timeout)
-    resp.raise_for_status()
-    return resp.content, resp.status_code
-
 
 def mineru_precision_extract_by_url(pdf_url, model_version="vlm", language="ch",
                                      poll_interval=10, poll_timeout=600, output_dir=None):

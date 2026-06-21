@@ -802,6 +802,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.file_utils._load_merged_json_dicts is paper_audit._load_merged_json_dicts
     assert veritas.html_utils._html_escape is paper_audit._html_escape
     assert veritas.html_utils._json_for_script_tag is paper_audit._json_for_script_tag
+    assert veritas.http_client._http_request is paper_audit._http_request
     assert veritas.markdown_utils._md_escape_cell is paper_audit._md_escape_cell
     assert veritas.evidence_rendering._clean_mineru_table_block is paper_audit._clean_mineru_table_block
     assert veritas.evidence_rendering._escaped_html_table_fragment_to_html is paper_audit._escaped_html_table_fragment_to_html
@@ -980,6 +981,41 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.web_runner.web_runner_cors_headers is paper_audit.web_runner_cors_headers
     assert callable(veritas.web_runner.web_runner_default_output_stem_from_namespace)
     assert callable(veritas.web_runner.web_runner_config_status_from_namespace)
+
+
+def test_http_request_uses_browser_user_agent_without_network(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        content = b"ok"
+        status_code = 202
+
+        def raise_for_status(self):
+            calls.append(("raise_for_status",))
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        calls.append(("post", url, headers, data, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr(veritas.http_client.requests, "post", fake_post)
+
+    content, status = paper_audit._http_request(
+        "https://example.test/api",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        data=b"payload",
+        timeout=7,
+    )
+
+    assert content == b"ok"
+    assert status == 202
+    assert calls[0][0] == "post"
+    assert calls[0][1] == "https://example.test/api"
+    assert calls[0][2]["Authorization"] == "Bearer token"
+    assert "Mozilla/5.0" in calls[0][2]["User-Agent"]
+    assert calls[0][3] == b"payload"
+    assert calls[0][4] == 7
+    assert calls[1] == ("raise_for_status",)
 
 
 def test_importing_veritas_package_does_not_import_legacy_boundary():
