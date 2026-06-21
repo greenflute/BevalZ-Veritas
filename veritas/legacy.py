@@ -2968,6 +2968,154 @@ def _prepare_run_audit_context(input_path, args):
     }
 
 
+def _single_file_text_entry(file_path, text):
+    return [{
+        "file": file_path.name,
+        "path": file_path.name,
+        "category": "main_text",
+        "text": text,
+    }]
+
+
+def _unsupported_single_input_failure(single_suffix, completed_stages, retry_command):
+    if single_suffix == ".doc":
+        message = "暂不支持旧版二进制Word .doc 文件直接输入；请转换为 .docx 或 PDF 后重试。"
+        hints = ["用 Word/WPS/LibreOffice 另存为 .docx。", "或导出为 PDF 后重新运行审查。"]
+        error_class = "unsupported_legacy_doc"
+    else:
+        message = f"不支持的单文件输入类型: {single_suffix or '(无扩展名)'}。"
+        hints = ["请使用 PDF、.docx、Excel、CSV、TXT 或 Markdown 文件。", "也可以把论文相关文件放入目录后进行目录审查。"]
+        error_class = "unsupported_file_type"
+    return AuditFailure(
+        capability="input_extraction",
+        error_class=error_class,
+        message=message,
+        fix_hints=hints,
+        completed_stages=completed_stages,
+        retry_command=retry_command,
+    )
+
+
+def _extract_non_pdf_input_file(file_path, single_suffix, args, output_dir, completed_stages, retry_command, resume_dir):
+    missing_dependency = (
+        single_suffix == ".docx" and not DOCX_SUPPORTED
+    ) or (
+        single_suffix in {".xlsx", ".xlsm"} and not EXCEL_SUPPORTED
+    )
+    if missing_dependency:
+        dependency, install_command = optional_dependency_for_extension(single_suffix)
+        return {"failure": AuditFailure(
+            capability="input_extraction",
+            error_class="missing_optional_dependency",
+            message=f"读取 {single_suffix} 文件需要安装可选依赖 {dependency}。",
+            fix_hints=[f"运行 `{install_command}` 后重试。", "或转换为 PDF 后重新运行审查。"],
+            completed_stages=completed_stages,
+            retry_command=retry_command,
+            details={"dependency": dependency, "install_command": install_command, "resume_dir": str(resume_dir)},
+        )}
+    print(f"📖 正在提取{single_suffix}文件文本: {file_path}")
+    full_text = extract_text_from_file(
+        file_path,
+        max_chars_per_file=None,
+        use_mineru=False,
+        mineru_lang=args.mineru_lang,
+        output_dir=output_dir,
+    )
+    body_text = extracted_body_text(full_text, file_path.name)
+    if not body_text:
+        return {"failure": AuditFailure(
+            capability="input_extraction",
+            error_class="no_extractable_text",
+            message=f"未能从 {single_suffix} 文件中提取到可审查文本。",
+            fix_hints=["检查文件是否为空、损坏或受保护。", "尝试另存为 .docx/PDF 后重试。"],
+            completed_stages=completed_stages,
+            retry_command=retry_command,
+        )}
+    meta = {
+        "input_type": "file",
+        "source_file": file_path.name,
+        "size_mb": round(file_path.stat().st_size / 1024 / 1024, 2),
+        "total_chars": len(full_text),
+        "chars_sent": len(full_text),
+        "extractor": "single_file_multi_format",
+        "extraction_method": f"{single_suffix.lstrip('.')}_text",
+    }
+    print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
+    progress_bar(1, 5, "阶段1/5 单文件文本提取完成")
+    return {
+        "full_text": full_text,
+        "meta": meta,
+        "raw_pdf": None,
+        "extracted_file_texts": _single_file_text_entry(file_path, full_text),
+    }
+
+
+def _extract_pdf_input_file(file_path, args, output_dir, use_mineru, completed_stages, retry_command):
+    full_text = None
+    meta = {}
+    raw_pdf = None
+    if use_mineru:
+        print(f"📡 [MinerU] 正在将PDF转为Markdown: {file_path.name}")
+        md_text, md_meta = mineru_extract(file_path, language=args.mineru_lang, output_dir=output_dir)
+        if md_text:
+            full_text = md_text
+            meta = {
+                "size_mb": round(file_path.stat().st_size / 1024 / 1024, 2),
+                "total_chars": len(md_text),
+                "chars_sent": len(md_text),
+                "extraction_method": f"mineru_{md_meta.get('source', 'unknown')}",
+            }
+            if md_meta.get("batch_id"):
+                meta["mineru_batch_id"] = md_meta["batch_id"]
+            if md_meta.get("task_id"):
+                meta["mineru_task_id"] = md_meta["task_id"]
+            print(f"✅ MinerU提取完成: {len(md_text)} 字符（全文保留）")
+            progress_bar(1, 5, "阶段1/5 MinerU文本提取完成")
+        else:
+            err = md_meta.get("error", "未知错误") if md_meta else "未知错误"
+            print(f"❌ MinerU提取失败: {err}")
+            print(f"⚠️ 降级使用原始PDF文本提取...")
+            use_mineru = False
+
+    if not use_mineru or full_text is None:
+        print(f"📖 正在提取PDF文本: {file_path}")
+        full_text, meta, raw_pdf = extract_pdf_text(str(file_path), max_chars=999999)
+        if not full_text:
+            print("❌ 未能从PDF中提取到文本（可能是扫描件或加密PDF）")
+            print("💡 建议: 使用 --mineru 参数通过MinerU API提取（支持OCR）")
+            return {"failure": AuditFailure(
+                capability="input_extraction",
+                error_class="no_extractable_text",
+                message="未能从PDF中提取到文本（可能是扫描件或加密PDF）。",
+                fix_hints=["检查PDF是否加密或为扫描件。", "确认MinerU配置可用后重试。"],
+                completed_stages=completed_stages,
+                retry_command=retry_command,
+            )}
+        print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
+        progress_bar(1, 5, "阶段1/5 PDF文本提取完成")
+
+    return {
+        "full_text": full_text,
+        "meta": meta,
+        "raw_pdf": raw_pdf,
+        "use_mineru": use_mineru,
+        "extracted_file_texts": _single_file_text_entry(file_path, full_text),
+    }
+
+
+def _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir):
+    print(f"📄 检测到输入为单个文件: {input_path.name}")
+    single_suffix = input_path.suffix.lower()
+    if single_suffix not in SUPPORTED_TEXT_FILE_EXTENSIONS:
+        return {"failure": _unsupported_single_input_failure(single_suffix, completed_stages, retry_command)}
+    if single_suffix != ".pdf":
+        result = _extract_non_pdf_input_file(input_path, single_suffix, args, output_dir, completed_stages, retry_command, resume_dir)
+        if "failure" not in result:
+            result["use_mineru"] = use_mineru
+        return result
+    return _extract_pdf_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command)
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3226,139 +3374,14 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         print(f"\n✅ 所有文件提取完成，总长度: {len(full_text)} 字符")
         progress_bar(1, 5, "阶段1/5 文本提取完成")
     elif full_text is None:
-        # 单个文件走原有流程
-        pdf_path = input_path
-        print(f"📄 检测到输入为单个文件: {pdf_path.name}")
-        single_suffix = pdf_path.suffix.lower()
-
-        if single_suffix not in SUPPORTED_TEXT_FILE_EXTENSIONS:
-            if single_suffix == ".doc":
-                message = "暂不支持旧版二进制Word .doc 文件直接输入；请转换为 .docx 或 PDF 后重试。"
-                hints = ["用 Word/WPS/LibreOffice 另存为 .docx。", "或导出为 PDF 后重新运行审查。"]
-                error_class = "unsupported_legacy_doc"
-            else:
-                message = f"不支持的单文件输入类型: {single_suffix or '(无扩展名)'}。"
-                hints = ["请使用 PDF、.docx、Excel、CSV、TXT 或 Markdown 文件。", "也可以把论文相关文件放入目录后进行目录审查。"]
-                error_class = "unsupported_file_type"
-            failure = AuditFailure(
-                capability="input_extraction",
-                error_class=error_class,
-                message=message,
-                fix_hints=hints,
-                completed_stages=completed_stages,
-                retry_command=retry_command,
-            )
-            return _fail_run(failure)
-
-        if single_suffix != ".pdf":
-            missing_dependency = (
-                single_suffix == ".docx" and not DOCX_SUPPORTED
-            ) or (
-                single_suffix in {".xlsx", ".xlsm"} and not EXCEL_SUPPORTED
-            )
-            if missing_dependency:
-                dependency, install_command = optional_dependency_for_extension(single_suffix)
-                failure = AuditFailure(
-                    capability="input_extraction",
-                    error_class="missing_optional_dependency",
-                    message=f"读取 {single_suffix} 文件需要安装可选依赖 {dependency}。",
-                    fix_hints=[f"运行 `{install_command}` 后重试。", "或转换为 PDF 后重新运行审查。"],
-                    completed_stages=completed_stages,
-                    retry_command=retry_command,
-                    details={"dependency": dependency, "install_command": install_command, "resume_dir": str(resume_dir)},
-                )
-                return _fail_run(failure)
-            print(f"📖 正在提取{single_suffix}文件文本: {pdf_path}")
-            full_text = extract_text_from_file(
-                pdf_path,
-                max_chars_per_file=None,
-                use_mineru=False,
-                mineru_lang=args.mineru_lang,
-                output_dir=output_dir,
-            )
-            body_text = extracted_body_text(full_text, pdf_path.name)
-            if not body_text:
-                failure = AuditFailure(
-                    capability="input_extraction",
-                    error_class="no_extractable_text",
-                    message=f"未能从 {single_suffix} 文件中提取到可审查文本。",
-                    fix_hints=["检查文件是否为空、损坏或受保护。", "尝试另存为 .docx/PDF 后重试。"],
-                    completed_stages=completed_stages,
-                    retry_command=retry_command,
-                )
-                return _fail_run(failure)
-            meta = {
-                "input_type": "file",
-                "source_file": pdf_path.name,
-                "size_mb": round(pdf_path.stat().st_size / 1024 / 1024, 2),
-                "total_chars": len(full_text),
-                "chars_sent": len(full_text),
-                "extractor": "single_file_multi_format",
-                "extraction_method": f"{single_suffix.lstrip('.')}_text",
-            }
-            extracted_file_texts = [{
-                "file": pdf_path.name,
-                "path": pdf_path.name,
-                "category": "main_text",
-                "text": full_text,
-            }]
-            raw_pdf = None
-            print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
-            progress_bar(1, 5, "阶段1/5 单文件文本提取完成")
-
-        if single_suffix == ".pdf" and use_mineru:
-            print(f"📡 [MinerU] 正在将PDF转为Markdown: {pdf_path.name}")
-            md_text, md_meta = mineru_extract(pdf_path, language=args.mineru_lang, output_dir=output_dir)
-            if md_text:
-                full_text = md_text  # 保留全文
-                meta = {
-                    "size_mb": round(pdf_path.stat().st_size / 1024 / 1024, 2),
-                    "total_chars": len(md_text),
-                    "chars_sent": len(md_text),
-                    "extraction_method": f"mineru_{md_meta.get('source', 'unknown')}",
-                }
-                if md_meta.get("batch_id"):
-                    meta["mineru_batch_id"] = md_meta["batch_id"]
-                if md_meta.get("task_id"):
-                    meta["mineru_task_id"] = md_meta["task_id"]
-                extracted_file_texts = [{
-                    "file": pdf_path.name,
-                    "path": pdf_path.name,
-                    "category": "main_text",
-                    "text": full_text,
-                }]
-                print(f"✅ MinerU提取完成: {len(md_text)} 字符（全文保留）")
-                progress_bar(1, 5, "阶段1/5 MinerU文本提取完成")
-            else:
-                err = md_meta.get("error", "未知错误") if md_meta else "未知错误"
-                print(f"❌ MinerU提取失败: {err}")
-                print(f"⚠️ 降级使用原始PDF文本提取...")
-                use_mineru = False
-
-        if single_suffix == ".pdf" and (not use_mineru or full_text is None):
-            print(f"📖 正在提取PDF文本: {pdf_path}")
-            # extract_pdf_text的max_chars参数传大值以获取全文
-            full_text, meta, raw_pdf = extract_pdf_text(str(pdf_path), max_chars=999999)
-            if not full_text:
-                print("❌ 未能从PDF中提取到文本（可能是扫描件或加密PDF）")
-                print("💡 建议: 使用 --mineru 参数通过MinerU API提取（支持OCR）")
-                failure = AuditFailure(
-                    capability="input_extraction",
-                    error_class="no_extractable_text",
-                    message="未能从PDF中提取到文本（可能是扫描件或加密PDF）。",
-                    fix_hints=["检查PDF是否加密或为扫描件。", "确认MinerU配置可用后重试。"],
-                    completed_stages=completed_stages,
-                    retry_command=retry_command,
-                )
-                return _fail_run(failure)
-            print(f"✅ 提取完成: {meta['total_chars']} 字符（全文保留）")
-            extracted_file_texts = [{
-                "file": pdf_path.name,
-                "path": pdf_path.name,
-                "category": "main_text",
-                "text": full_text,
-            }]
-            progress_bar(1, 5, "阶段1/5 PDF文本提取完成")
+        single_result = _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
+        if single_result.get("failure"):
+            return _fail_run(single_result["failure"])
+        full_text = single_result["full_text"]
+        meta = single_result["meta"]
+        raw_pdf = single_result["raw_pdf"]
+        use_mineru = single_result["use_mineru"]
+        extracted_file_texts = single_result["extracted_file_texts"]
 
     meta = normalize_run_meta(meta, input_path, full_text)
     meta["runtime"] = run_runtime
