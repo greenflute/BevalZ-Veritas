@@ -3711,6 +3711,21 @@ def _run_text_llm_preflight(preflight_state, record_preflight, retry_command, co
     return None
 
 
+def _run_pre_llm_audit_stages(full_text, meta, args, resume_dir, completed_stages):
+    if args.ai_detect:
+        launch_zhuque_ai_detect(full_text)
+
+    if args.image_detect:
+        print("ℹ️ --image-detect 已改为兼容参数；图片检测将在阶段4自动调用图像语义分析与imagedetector子工具，不会打开网页或要求手动上传。")
+
+    audit_text, reference_audit, resource_audit = _run_reference_resource_audits(full_text, meta, args, resume_dir)
+    completed_stages.append("stage1_reference_audit")
+    completed_stages.append("stage1_resource_audit")
+
+    stat_result = _run_local_stat_stage(audit_text, resume_dir, completed_stages)
+    return audit_text, reference_audit, resource_audit, stat_result
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3795,21 +3810,13 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     meta = stage1_result["meta"]
     extracted_file_texts = stage1_result["extracted_file_texts"]
 
-    # ─── 朱雀AI文本检测（可选） ───
-    if args.ai_detect:
-        launch_zhuque_ai_detect(full_text)
-
-    # ─── AI图片检测兼容参数 ───
-    if args.image_detect:
-        print("ℹ️ --image-detect 已改为兼容参数；图片检测将在阶段4自动调用图像语义分析与imagedetector子工具，不会打开网页或要求手动上传。")
-
-    # ─── 参考文献剥离与单独校检 ───
-    audit_text, reference_audit, resource_audit = _run_reference_resource_audits(full_text, meta, args, resume_dir)
-    completed_stages.append("stage1_reference_audit")
-    completed_stages.append("stage1_resource_audit")
-
-    # ─── 阶段2：本地统计检测（使用全文，统计不截断） ───
-    stat_result = _run_local_stat_stage(audit_text, resume_dir, completed_stages)
+    audit_text, reference_audit, resource_audit, stat_result = _run_pre_llm_audit_stages(
+        full_text,
+        meta,
+        args,
+        resume_dir,
+        completed_stages,
+    )
 
     # ─── 阶段3：智能分块 + LLM语义审查（冗余机制） ───
     text_llm_failed_result = _run_text_llm_preflight(
