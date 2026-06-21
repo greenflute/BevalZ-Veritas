@@ -3,7 +3,7 @@
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -127,6 +127,33 @@ class RunAuditContext:
     use_mineru_default: bool
 
 
+@dataclass
+class Stage1TextExtractionResult:
+    """Result returned by the stage-1 text extraction orchestration."""
+    full_text: str = ""
+    meta: Dict[str, Any] = field(default_factory=dict)
+    extracted_file_texts: List[Dict[str, Any]] = field(default_factory=list)
+    raw_pdf: Any = None
+    use_mineru: bool = False
+    failure: Any = None
+    diagnostics_meta: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TextLlmReviewStageResult:
+    """Result returned by the text-LLM review orchestration."""
+    report: Dict[str, Any] = field(default_factory=dict)
+    failure: Any = None
+
+
+@dataclass
+class ImageRiskEvidenceStageResult:
+    """Result returned by image, risk-rule, and evidence-chain orchestration."""
+    report: Dict[str, Any] = field(default_factory=dict)
+    image_audit: Any = None
+    failure: Any = None
+
+
 def _failure_field(failure: Any, name: str, default=None):
     if isinstance(failure, dict):
         return failure.get(name, default)
@@ -177,4 +204,11 @@ class RunResult:
         )
 
 
-__all__ = ["RunRequest", "RunAuditContext", "RunResult"]
+__all__ = [
+    "RunRequest",
+    "RunAuditContext",
+    "Stage1TextExtractionResult",
+    "TextLlmReviewStageResult",
+    "ImageRiskEvidenceStageResult",
+    "RunResult",
+]

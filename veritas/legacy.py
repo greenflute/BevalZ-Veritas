@@ -302,7 +302,14 @@ from .resource_reporting import (
     format_resource_audit_html,
     format_resource_audit_markdown,
 )
-from .run_types import RunAuditContext, RunRequest, RunResult
+from .run_types import (
+    ImageRiskEvidenceStageResult,
+    RunAuditContext,
+    RunRequest,
+    RunResult,
+    Stage1TextExtractionResult,
+    TextLlmReviewStageResult,
+)
 from .report_schema import LLM_REQUIRED_FINDING_FIELDS, normalize_llm_report_schema, parse_report
 from .report_checks import (
     _check_reason,
@@ -3455,10 +3462,12 @@ def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_rea
     if total_chunks == 1:
         print(f"🔍 论文长度({len(audit_text)}字符，已排除参考文献)在单块范围内，直接审查...")
         try:
-            return {"report": _run_single_llm_review(audit_text, llm_cache_dir, allow_llm_cache_read, allow_llm_cache_write, resume_dir)}
+            return TextLlmReviewStageResult(
+                report=_run_single_llm_review(audit_text, llm_cache_dir, allow_llm_cache_read, allow_llm_cache_write, resume_dir)
+            )
         except Exception as e:
             print(f"❌ LLM调用失败: {e}")
-            return {"failure": AuditFailure(
+            return TextLlmReviewStageResult(failure=AuditFailure(
                 capability="text_llm",
                 error_class="schema_error",
                 message=f"LLM语义审查失败或返回结构不符合证据schema: {e}",
@@ -3466,7 +3475,7 @@ def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_rea
                 completed_stages=completed_stages,
                 retry_command=retry_command,
                 details={"raw_error": str(e), "chunk": "1/1"},
-            )}
+            ))
 
     print(f"🔍 论文较长({len(audit_text)}字符，已排除参考文献)，分为{total_chunks}块(每块≤{chunk_size}字符，重叠{overlap}字符)进行审查...")
     chunk_reports, failed_chunks = _review_llm_chunks(
@@ -3490,25 +3499,25 @@ def _run_text_llm_review_stage(audit_text, args, resume_dir, allow_llm_cache_rea
     if still_failed:
         failure_summary = llm_retry_failure_summary(still_failed, args.strict_failed_chunks)
         resume_event(resume_dir, "stage3_llm_retry", "still_failed", failure_summary["event_detail"])
-        return {"failure": _text_llm_schema_failure(
+        return TextLlmReviewStageResult(failure=_text_llm_schema_failure(
             failure_summary["message"],
             {"failed_chunks": failure_summary["failed_chunks"], "detail": failure_summary["detail"]},
             completed_stages,
             retry_command,
-        )}
+        ))
     if failed_chunks:
         resume_event(resume_dir, "stage3_llm_retry", "done", "all failed chunks recovered")
 
     merge_result = _merge_successful_llm_chunks(chunk_reports, total_chunks, chunk_size, overlap, stat_result, meta, resume_dir)
     if merge_result.get("failure_summary"):
         failure_summary = merge_result["failure_summary"]
-        return {"failure": _text_llm_schema_failure(
+        return TextLlmReviewStageResult(failure=_text_llm_schema_failure(
             failure_summary["message"],
             failure_summary["details"],
             completed_stages,
             retry_command,
-        )}
-    return merge_result
+        ))
+    return TextLlmReviewStageResult(report=merge_result["report"])
 
 
 def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default, completed_stages, retry_command, resume_dir, run_runtime, preflight_results):
@@ -3534,17 +3543,17 @@ def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default
     if full_text is None and input_path.is_dir():
         directory_result = _extract_directory_input(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
         if directory_result.get("failure"):
-            return {
-                "failure": directory_result["failure"],
-                "diagnostics_meta": {"runtime": run_runtime, "preflight_results": preflight_results},
-            }
+            return Stage1TextExtractionResult(
+                failure=directory_result["failure"],
+                diagnostics_meta={"runtime": run_runtime, "preflight_results": preflight_results},
+            )
         full_text = directory_result["full_text"]
         meta = directory_result["meta"]
         extracted_file_texts = directory_result["extracted_file_texts"]
     elif full_text is None:
         single_result = _extract_single_input_file(input_path, args, output_dir, use_mineru, completed_stages, retry_command, resume_dir)
         if single_result.get("failure"):
-            return {"failure": single_result["failure"]}
+            return Stage1TextExtractionResult(failure=single_result["failure"])
         full_text = single_result["full_text"]
         meta = single_result["meta"]
         raw_pdf = single_result["raw_pdf"]
@@ -3572,13 +3581,13 @@ def _run_stage1_text_extraction(input_path, args, output_dir, use_mineru_default
             resume_event,
             resume_dir,
         )
-    return {
-        "full_text": full_text,
-        "meta": meta,
-        "raw_pdf": raw_pdf,
-        "use_mineru": use_mineru,
-        "extracted_file_texts": extracted_file_texts,
-    }
+    return Stage1TextExtractionResult(
+        full_text=full_text,
+        meta=meta,
+        raw_pdf=raw_pdf,
+        use_mineru=use_mineru,
+        extracted_file_texts=extracted_file_texts,
+    )
 
 
 def _finalize_run_audit_result(input_path, args, report, meta, stat_result, reference_audit, resource_audit, run_workspace, resume_dir, has_pdf_input):
@@ -3637,7 +3646,7 @@ def _apply_image_risk_and_evidence_stages(input_path, output_dir, args, resume_d
     image_audit = _run_image_audit_stage(input_path, output_dir, args, resume_dir, meta)
     failed_capability, failed_message, failed_details = coverage_blocking_failure(meta)
     if failed_capability:
-        return {"failure": AuditFailure(
+        return ImageRiskEvidenceStageResult(failure=AuditFailure(
             capability=failed_capability,
             error_class="provider_unavailable",
             message=failed_message,
@@ -3645,7 +3654,7 @@ def _apply_image_risk_and_evidence_stages(input_path, output_dir, args, resume_d
             completed_stages=completed_stages,
             retry_command=retry_command,
             details=failed_details,
-        )}
+        ))
     report = apply_risk_rules(report, stat_result=stat_result, image_audit=meta.get("image_audit"))
     meta["risk_rule_version"] = RISK_RULE_VERSION
     meta["evidence_chain_audit"] = build_evidence_chain_audit(
@@ -3655,7 +3664,7 @@ def _apply_image_risk_and_evidence_stages(input_path, output_dir, args, resume_d
         meta,
         stat_result,
     )
-    return {"report": report, "image_audit": image_audit}
+    return ImageRiskEvidenceStageResult(report=report, image_audit=image_audit)
 
 
 def _run_mineru_preflight_if_needed(use_mineru_default, preflight_state, record_preflight, retry_command, completed_stages, fail_run, preflight_results):
@@ -3804,11 +3813,11 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         run_runtime,
         preflight_results,
     )
-    if stage1_result.get("failure"):
-        return _fail_run(stage1_result["failure"], diagnostics_meta=stage1_result.get("diagnostics_meta"))
-    full_text = stage1_result["full_text"]
-    meta = stage1_result["meta"]
-    extracted_file_texts = stage1_result["extracted_file_texts"]
+    if stage1_result.failure:
+        return _fail_run(stage1_result.failure, diagnostics_meta=stage1_result.diagnostics_meta)
+    full_text = stage1_result.full_text
+    meta = stage1_result.meta
+    extracted_file_texts = stage1_result.extracted_file_texts
 
     audit_text, reference_audit, resource_audit, stat_result = _run_pre_llm_audit_stages(
         full_text,
@@ -3842,9 +3851,9 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         completed_stages,
         retry_command,
     )
-    if llm_result.get("failure"):
-        return _fail_run(llm_result["failure"], diagnostics_meta=meta)
-    report = llm_result["report"]
+    if llm_result.failure:
+        return _fail_run(llm_result.failure, diagnostics_meta=meta)
+    report = llm_result.report
 
     # ─── 图像合理性检测：使用MinerU已保存zip中的图片/目录图片生成报告清单 ───
     image_stage = _apply_image_risk_and_evidence_stages(
@@ -3860,9 +3869,9 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         completed_stages,
         retry_command,
     )
-    if image_stage.get("failure"):
-        return _fail_run(image_stage["failure"], diagnostics_meta=meta)
-    report = image_stage["report"]
+    if image_stage.failure:
+        return _fail_run(image_stage.failure, diagnostics_meta=meta)
+    report = image_stage.report
 
     # ─── 阶段5：生成报告 ───
     return _finalize_run_audit_result(
