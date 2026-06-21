@@ -1,4 +1,5 @@
 import json
+import http.server
 import io
 import types
 import subprocess
@@ -6007,6 +6008,37 @@ def test_web_runner_cors_headers_preserve_report_action_compatibility():
     assert headers["Access-Control-Allow-Origin"] == "*"
     assert "POST" in headers["Access-Control-Allow-Methods"]
     assert headers["Access-Control-Allow-Headers"] == "Content-Type"
+
+
+def test_serve_web_runner_uses_module_handler_and_attaches_state(monkeypatch, tmp_path):
+    servers = []
+
+    class FakeThreadingHTTPServer:
+        def __init__(self, address, handler_class):
+            self.address = address
+            self.handler_class = handler_class
+            self.served = False
+            self.closed = False
+            servers.append(self)
+
+        def serve_forever(self):
+            self.served = True
+
+        def server_close(self):
+            self.closed = True
+
+    monkeypatch.setattr(http.server, "ThreadingHTTPServer", FakeThreadingHTTPServer)
+
+    exit_code = paper_audit.serve_web_runner(port=9124, open_browser=False, history_path=tmp_path / "runs.json")
+
+    assert exit_code == 0
+    assert len(servers) == 1
+    server = servers[0]
+    assert server.address == ("127.0.0.1", 9124)
+    assert server.handler_class is paper_audit.WebRunnerRequestHandler
+    assert isinstance(server.runner_state, paper_audit.WebRunnerState)
+    assert server.served is True
+    assert server.closed is True
 
 
 def test_web_runner_start_run_spawns_existing_cli(monkeypatch, tmp_path):

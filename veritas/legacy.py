@@ -8,6 +8,7 @@
 用法: python paper_audit.py <paper_path> [--mineru] [--max-chars 8000] [--output report.md]
 """
 import re, json, time, argparse, urllib.request, urllib.parse, math, collections, os, mimetypes, fnmatch, csv, platform, webbrowser, subprocess, sys, requests, hashlib, io, concurrent.futures, threading, datetime
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Tuple, Dict, List, Any, Callable
 
@@ -2238,124 +2239,131 @@ def gui_main():
     return run_desktop_gui()
 
 
+class WebRunnerRequestHandler(BaseHTTPRequestHandler):
+    server_version = "VeritasWebRunner/1.0"
+
+    def _runner_state(self):
+        return self.server.runner_state
+
+    def _send_bytes(self, data, content_type="application/octet-stream", status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        for key, value in web_runner_cors_headers().items():
+            self.send_header(key, value)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_json(self, payload, status=200):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self._send_bytes(data, "application/json; charset=utf-8", status=status)
+
+    def _route(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        query = urllib.parse.parse_qs(parsed.query)
+        return path, query
+
+    def do_OPTIONS(self):
+        self._send_json({"ok": True})
+
+    def do_GET(self):
+        path, query = self._route()
+        state = self._runner_state()
+        if path == "/":
+            self._send_bytes(render_web_runner_page().encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path == "/health":
+            self._send_json({"ok": True, "model": LLM_MODEL, "web_runner": True})
+            return
+        if path == "/api/config":
+            self._send_json(web_runner_config_status())
+            return
+        if path == "/api/runs":
+            self._send_json({"ok": True, "runs": state.list_runs()})
+            return
+        match = re.match(r"^/api/runs/([^/]+)$", path)
+        if match:
+            run = state.get_run(urllib.parse.unquote(match.group(1)))
+            self._send_json({"ok": bool(run), "run": run} if run else {"ok": False, "error": "not_found"}, 200 if run else 404)
+            return
+        match = re.match(r"^/api/runs/([^/]+)/logs$", path)
+        if match:
+            payload = state.logs_since(urllib.parse.unquote(match.group(1)), (query.get("offset") or ["0"])[0])
+            self._send_json(payload if payload else {"ok": False, "error": "not_found"}, 200 if payload else 404)
+            return
+        match = re.match(r"^/api/runs/([^/]+)/artifacts$", path)
+        if match:
+            run = state.discover_artifacts(urllib.parse.unquote(match.group(1)))
+            self._send_json({"ok": bool(run), "run": run, "artifacts": (run or {}).get("artifacts", {})}, 200 if run else 404)
+            return
+        match = re.match(r"^/artifact/([^/]+)/([^/]+)$", path)
+        if match:
+            run_id = urllib.parse.unquote(match.group(1))
+            kind = urllib.parse.unquote(match.group(2))
+            target, error = state.artifact_target(run_id, kind)
+            if error:
+                self._send_json({"ok": False, "error": error}, 404)
+                return
+            if kind == "folder":
+                payload = json.dumps({"ok": True, "path": str(target)}, ensure_ascii=False, indent=2).encode("utf-8")
+                self._send_bytes(payload, "application/json; charset=utf-8")
+                return
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            self._send_bytes(Path(target).read_bytes(), content_type)
+            return
+        self._send_json({"ok": False, "error": "not_found"}, 404)
+
+    def do_POST(self):
+        path, _query = self._route()
+        state = self._runner_state()
+        if path in {"/generate", "/followups"}:
+            try:
+                payload = _read_json_request_body(self)
+                self._send_json(_report_action_api_response(path, payload))
+            except ValueError as e:
+                status = 413 if str(e) == "request_too_large" else 400
+                self._send_json({"ok": False, "error": str(e)}, status)
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+            return
+        if path == "/api/runs":
+            try:
+                payload = _read_json_request_body(self, max_bytes=20_000)
+                response, status = state.start_run(payload.get("input_path"), output=payload.get("output"), fresh=bool(payload.get("fresh")))
+                self._send_json(response, status)
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+            return
+        if path == "/api/pick-path":
+            try:
+                payload = _read_json_request_body(self, max_bytes=20_000)
+                response = pick_local_path(payload.get("mode"))
+                self._send_json(response, 200 if response.get("ok") else 400)
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
+            return
+        match = re.match(r"^/api/runs/([^/]+)/cancel$", path)
+        if match:
+            response, status = state.cancel_run(urllib.parse.unquote(match.group(1)))
+            self._send_json(response, status)
+            return
+        self._send_json({"ok": False, "error": "not_found"}, 404)
+
+    def log_message(self, fmt, *args):
+        print(f"[web-runner] {self.address_string()} {fmt % args}")
+
+
 
 
 def serve_web_runner(host="127.0.0.1", port=8765, open_browser=True, history_path=None):
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import ThreadingHTTPServer
 
     state = WebRunnerState(history_path=history_path)
 
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "VeritasWebRunner/1.0"
-
-        def _send_bytes(self, data, content_type="application/octet-stream", status=200):
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            for key, value in web_runner_cors_headers().items():
-                self.send_header(key, value)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _send_json(self, payload, status=200):
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self._send_bytes(data, "application/json; charset=utf-8", status=status)
-
-        def _route(self):
-            parsed = urllib.parse.urlparse(self.path)
-            path = parsed.path.rstrip("/") or "/"
-            query = urllib.parse.parse_qs(parsed.query)
-            return path, query
-
-        def do_OPTIONS(self):
-            self._send_json({"ok": True})
-
-        def do_GET(self):
-            path, query = self._route()
-            if path == "/":
-                self._send_bytes(render_web_runner_page().encode("utf-8"), "text/html; charset=utf-8")
-                return
-            if path == "/health":
-                self._send_json({"ok": True, "model": LLM_MODEL, "web_runner": True})
-                return
-            if path == "/api/config":
-                self._send_json(web_runner_config_status())
-                return
-            if path == "/api/runs":
-                self._send_json({"ok": True, "runs": state.list_runs()})
-                return
-            match = re.match(r"^/api/runs/([^/]+)$", path)
-            if match:
-                run = state.get_run(urllib.parse.unquote(match.group(1)))
-                self._send_json({"ok": bool(run), "run": run} if run else {"ok": False, "error": "not_found"}, 200 if run else 404)
-                return
-            match = re.match(r"^/api/runs/([^/]+)/logs$", path)
-            if match:
-                payload = state.logs_since(urllib.parse.unquote(match.group(1)), (query.get("offset") or ["0"])[0])
-                self._send_json(payload if payload else {"ok": False, "error": "not_found"}, 200 if payload else 404)
-                return
-            match = re.match(r"^/api/runs/([^/]+)/artifacts$", path)
-            if match:
-                run = state.discover_artifacts(urllib.parse.unquote(match.group(1)))
-                self._send_json({"ok": bool(run), "run": run, "artifacts": (run or {}).get("artifacts", {})}, 200 if run else 404)
-                return
-            match = re.match(r"^/artifact/([^/]+)/([^/]+)$", path)
-            if match:
-                run_id = urllib.parse.unquote(match.group(1))
-                kind = urllib.parse.unquote(match.group(2))
-                target, error = state.artifact_target(run_id, kind)
-                if error:
-                    self._send_json({"ok": False, "error": error}, 404)
-                    return
-                if kind == "folder":
-                    payload = json.dumps({"ok": True, "path": str(target)}, ensure_ascii=False, indent=2).encode("utf-8")
-                    self._send_bytes(payload, "application/json; charset=utf-8")
-                    return
-                content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-                self._send_bytes(Path(target).read_bytes(), content_type)
-                return
-            self._send_json({"ok": False, "error": "not_found"}, 404)
-
-        def do_POST(self):
-            path, _query = self._route()
-            if path in {"/generate", "/followups"}:
-                try:
-                    payload = _read_json_request_body(self)
-                    self._send_json(_report_action_api_response(path, payload))
-                except ValueError as e:
-                    status = 413 if str(e) == "request_too_large" else 400
-                    self._send_json({"ok": False, "error": str(e)}, status)
-                except Exception as e:
-                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
-                return
-            if path == "/api/runs":
-                try:
-                    payload = _read_json_request_body(self, max_bytes=20_000)
-                    response, status = state.start_run(payload.get("input_path"), output=payload.get("output"), fresh=bool(payload.get("fresh")))
-                    self._send_json(response, status)
-                except Exception as e:
-                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
-                return
-            if path == "/api/pick-path":
-                try:
-                    payload = _read_json_request_body(self, max_bytes=20_000)
-                    response = pick_local_path(payload.get("mode"))
-                    self._send_json(response, 200 if response.get("ok") else 400)
-                except Exception as e:
-                    self._send_json({"ok": False, "error": f"{type(e).__name__}: {_brief_text(str(e), 300)}"}, 500)
-                return
-            match = re.match(r"^/api/runs/([^/]+)/cancel$", path)
-            if match:
-                response, status = state.cancel_run(urllib.parse.unquote(match.group(1)))
-                self._send_json(response, status)
-                return
-            self._send_json({"ok": False, "error": "not_found"}, 404)
-
-        def log_message(self, fmt, *args):
-            print(f"[web-runner] {self.address_string()} {fmt % args}")
-
     try:
-        httpd = ThreadingHTTPServer((host, int(port)), Handler)
+        httpd = ThreadingHTTPServer((host, int(port)), WebRunnerRequestHandler)
+        httpd.runner_state = state
     except OSError as e:
         print(f"无法启动Web Runner: {e}")
         print(f"端口 {port} 可能已被占用；请改用 --web-port <port>。")
