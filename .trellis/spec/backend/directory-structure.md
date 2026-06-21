@@ -272,11 +272,12 @@ tests/
   source tags, source/reason extraction, merged-finding summary HTML, and check
   sort/verdict helpers shared by report rendering and evidence-chain clustering.
   It must remain provider-free and must not call text LLMs or external services.
-- `veritas/report_html_fragments.py` owns small top-level HTML report status
-  fragments such as limited notices, chunk metadata, number-consistency rows,
-  LLM coverage banners, and score breakdown text. It should stay
-  namespace-aware while compatibility wrappers live in `veritas.legacy`, so
-  tests and user scripts can still monkeypatch HTML escaping.
+- `veritas/report_html_fragments.py` owns top-level HTML report fragments such
+  as limited notices, chunk metadata, number-consistency rows, LLM coverage
+  banners, score breakdown text, and the body/header/stat/footer shell. It
+  should stay namespace-aware while compatibility wrappers live in
+  `veritas.legacy`, so tests and user scripts can still monkeypatch HTML
+  escaping, runtime clock, and version constants.
 - `veritas/report_html_sections.py` owns HTML report sections derived from LLM
   checks: parse-error output, top suspicious evidence cards, all-checks table,
   per-finding detail cards, and conclusion text. It should stay
