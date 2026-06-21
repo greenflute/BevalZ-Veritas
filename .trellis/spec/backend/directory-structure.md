@@ -38,6 +38,7 @@ veritas/
 ├── paper_identity.py   # Best-effort article identity extraction helpers
 ├── preflight.py        # Critical capability preflight boundary
 ├── project_files.py    # Project file discovery and run metadata helpers
+├── reference_parsing.py # Reference section parsing and query-building helpers
 ├── renderers.py        # Markdown/HTML renderer boundary
 ├── risk_rule_helpers.py # Shared risk scoring/merge helpers for rules/rendering
 ├── risk_rules.py       # Versioned final risk scoring boundary
@@ -149,6 +150,11 @@ tests/
 - `veritas/paper_identity.py` owns best-effort article title, journal, and
   author extraction for follow-up draft context. It should stay deterministic
   and may reuse evidence cleanup helpers, but must not call providers.
+- `veritas/reference_parsing.py` owns deterministic reference-section splitting,
+  offline bibliography parsing, DOI/title/author/container/year hint extraction,
+  author similarity, and reference query/cache-key construction. Crossref,
+  OpenAlex, PubMed, and official-site network lookups remain outside this
+  boundary.
 - `veritas/followups.py` owns PubPeer/comment and journal-letter language,
   tone, article-identity, issue-normalization, context-building, prompt
   construction, draft artifact load/save, and namespace-aware generation
