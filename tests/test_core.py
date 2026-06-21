@@ -4816,6 +4816,18 @@ def test_markdown_suspicious_finding_row_escapes_cells_and_uses_callbacks():
     assert "Mismatch \\| risk" in row
 
 
+def test_markdown_check_overview_row_escapes_cells_and_fallbacks():
+    row = veritas.report_markdown._markdown_check_overview_row(
+        5,
+        {"category": "数据|结果", "item": "样本量", "verdict": "⚠️存疑", "source_text": ""},
+        paper_audit._md_escape_cell,
+        lambda check: check.get("source_text", ""),
+        paper_audit._brief_text,
+    )
+
+    assert row == "| 5 | 数据\\|结果 | 样本量 | ⚠️存疑 | - |"
+
+
 def test_reports_include_review_overview_and_internal_evidence_links(tmp_path):
     stat = {
         "benford_deviation": None,

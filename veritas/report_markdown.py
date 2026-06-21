@@ -129,6 +129,15 @@ def _markdown_suspicious_finding_row(
     )
 
 
+def _markdown_check_overview_row(index, check, md_escape, check_source_text, brief_text):
+    return (
+        f"| {index} | {md_escape(check.get('category', 'N/A'))} | "
+        f"{md_escape(check.get('item', 'N/A'))} | "
+        f"{md_escape(check.get('verdict', 'N/A'))} | "
+        f"{md_escape(brief_text(check_source_text(check), 120) or '-')} |"
+    )
+
+
 def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result):
     """Format the audit result as a Markdown report."""
     normalize_meta = _namespace_value(namespace, "normalize_run_meta", normalize_run_meta)
@@ -214,7 +223,7 @@ def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result)
         lines.append("| # | 分类 | 检查项 | 判定 | 证据摘要 |")
         lines.append("|---|------|--------|------|----------|")
         for i, c in enumerate(checks, 1):
-            lines.append(f"| {i} | {md_escape(c.get('category', 'N/A'))} | {md_escape(c.get('item', 'N/A'))} | {md_escape(c.get('verdict', 'N/A'))} | {md_escape(brief_text(check_source_text(c), 120) or '-')} |")
+            lines.append(_markdown_check_overview_row(i, c, md_escape, check_source_text, brief_text))
         lines.append("")
 
         lines.append('<a id="finding-details"></a>')
