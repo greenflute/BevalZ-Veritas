@@ -433,32 +433,9 @@ renderCurrentRun(null);
 refreshRuns();"""
 
 
-def render_web_runner_page():
-    return web_runner_page_head_markup() + web_runner_page_body_markup() + web_runner_page_script_markup("""
-const $ = (id) => document.getElementById(id);
-let activeRunId = null;
-let logOffset = 0;
-let timer = null;
-let selectedInputKind = '';
-let lastRun = null;
-async function api(path, options={}) {
-  const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
-  const data = await res.json();
-  if (!res.ok) throw data;
-  return data;
-}
-function setStatus(text, cls='') {
-  const el = $('runStatus');
-  el.className = 'status ' + cls;
-  el.textContent = text;
-}
-function setFeedback(text, cls='') {
-  const el = $('runFeedback');
-  if (!el) return;
-  el.className = 'feedback ' + cls;
-  el.textContent = text || '选择输入后点击 Start，生成的报告会在这里显示。';
-}
-function escapeHtml(value) {
+def web_runner_page_path_script():
+    """Return path/default-output and drag/drop parsing JavaScript for the page."""
+    return """function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 function pathSeparator(path) {
@@ -532,7 +509,35 @@ function droppedPathFromTransferText(dataTransfer) {
     if (path) return path;
   }
   return '';
+}"""
+
+
+def render_web_runner_page():
+    return web_runner_page_head_markup() + web_runner_page_body_markup() + web_runner_page_script_markup("""
+const $ = (id) => document.getElementById(id);
+let activeRunId = null;
+let logOffset = 0;
+let timer = null;
+let selectedInputKind = '';
+let lastRun = null;
+async function api(path, options={}) {
+  const res = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
+  const data = await res.json();
+  if (!res.ok) throw data;
+  return data;
 }
+function setStatus(text, cls='') {
+  const el = $('runStatus');
+  el.className = 'status ' + cls;
+  el.textContent = text;
+}
+function setFeedback(text, cls='') {
+  const el = $('runFeedback');
+  if (!el) return;
+  el.className = 'feedback ' + cls;
+  el.textContent = text || '选择输入后点击 Start，生成的报告会在这里显示。';
+}
+""" + web_runner_page_path_script() + """
 function setSelectedInputPath(path, kind = '') {
   selectedInputKind = kind;
   $('inputPath').value = path;
@@ -762,6 +767,7 @@ __all__ = [
     "web_runner_page_head_markup",
     "web_runner_page_script_markup",
     "web_runner_page_bootstrap_script",
+    "web_runner_page_path_script",
     "render_web_runner_page",
     "web_runner_cors_headers",
 ]
