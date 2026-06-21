@@ -35,6 +35,7 @@ veritas/
 ├── image_reporting.py  # Image audit report and review-manifest rendering helpers
 ├── image_results.py    # Image provider response normalization helpers
 ├── image_selection.py  # Image audit selection and cache-flush helpers
+├── limit_utils.py      # Shared item-limit normalization helpers
 ├── local_analysis.py   # Local statistics and text chunking helpers
 ├── markdown_utils.py   # Shared Markdown table rendering helpers
 ├── mineru_text.py      # MinerU structured content-list text formatting helpers
@@ -146,6 +147,8 @@ tests/
 - `veritas/image_selection.py` owns deterministic image audit sorting,
   semantic/detector priority keys, and cache flush callback handling. It must
   not collect images or call providers.
+- `veritas/limit_utils.py` owns shared deterministic item-limit normalization
+  used by reference and image audit flows.
 - `veritas/evidence_rendering.py` owns deterministic evidence excerpt cleanup,
   MinerU table marker removal, Markdown/HTML table parsing, data-table HTML
   rendering, and compact evidence summary HTML. It must remain provider-free

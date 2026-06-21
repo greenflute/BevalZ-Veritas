@@ -96,6 +96,7 @@ from .image_selection import (
     _image_detector_priority_key,
     _image_semantic_priority_key,
 )
+from .limit_utils import _effective_limit
 from .local_analysis import benford_analysis, extract_all_numbers, local_stat_check, smart_chunk_text
 from .config import (
     CapabilityConfig,
@@ -375,10 +376,6 @@ def load_runtime_config(config_module_name: str = "config", env=os.environ, verb
 def apply_runtime_config(runtime_config: RuntimeConfig):
     """Apply explicit runtime config to the legacy module globals used by current code."""
     return apply_runtime_config_to_namespace(runtime_config, globals())
-
-
-def _effective_limit(limit, total: int) -> int:
-    return max(0, int(total if limit is None else limit))
 
 
 def preflight_mineru(timeout=10) -> PreflightResult:
