@@ -44,6 +44,7 @@ veritas/
 ├── reference_reporting.py # Reference audit Markdown/HTML rendering helpers
 ├── renderers.py        # Markdown/HTML renderer boundary
 ├── report_action_context.py # HTML follow-up/report action context helpers
+├── report_action_panel.py # HTML follow-up/report action panel rendering helpers
 ├── report_checks.py    # Deterministic LLM finding scoring/display helpers
 ├── review_overview.py  # Review overview and action-priority rendering helpers
 ├── resource_parsing.py # Resource URL extraction and classification helpers
@@ -181,6 +182,9 @@ tests/
   saved-report context consumed by HTML PubPeer/comment and journal-letter
   actions. It may aggregate already-computed audit payloads, but must not start
   local services, call providers, or perform network I/O.
+- `veritas/report_action_panel.py` owns deterministic HTML rendering for the
+  saved-report PubPeer/comment and journal-letter action panel. Local action
+  service process management and HTTP handlers remain outside this boundary.
 - `veritas/report_checks.py` owns deterministic LLM finding suspicion scoring,
   source tags, source/reason extraction, merged-finding summary HTML, and check
   sort/verdict helpers shared by report rendering and evidence-chain clustering.
