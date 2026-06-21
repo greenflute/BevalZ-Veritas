@@ -69,6 +69,27 @@ def _markdown_report_metadata_lines(
     return lines
 
 
+def _markdown_local_statistics_lines(stat_result):
+    """Build the deterministic local-statistics Markdown table."""
+    lines = [
+        f"",
+        f'<a id="local-statistics"></a>',
+        f"## 📊 本地统计检测结果",
+        f"| 检测项 | 结果 | 状态 |",
+        f"|--------|------|------|",
+        f"| Benford分布偏差 | {round(stat_result['benford_deviation'],3) if stat_result['benford_deviation'] else '样本不足'} | {stat_result['benford_status'] or 'N/A'} |",
+        f"| p值数量/异常 | {stat_result['p_value_count']} / {stat_result['p_value_abnormal']}个>0.05 | {'⚠️异常' if stat_result['p_value_abnormal'] else '✅正常'} |",
+        f"| 标准差提及 | {stat_result['sd_count']}处 | N/A |",
+        f"| 提取数字数 | {stat_result['number_count']} | - |",
+    ]
+
+    if stat_result.get("number_consistency"):
+        lines.append(f"| 数字自洽性 | {stat_result['number_consistency']} | ⚠️矛盾 |")
+
+    lines.append("")
+    return lines
+
+
 def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result):
     """Format the audit result as a Markdown report."""
     normalize_meta = _namespace_value(namespace, "normalize_run_meta", normalize_run_meta)
@@ -110,22 +131,7 @@ def format_report_from_namespace(namespace, report, pdf_path, meta, stat_result)
         lines.extend([""])
         lines.extend(review_overview(report, meta, stat_result))
 
-    lines.extend([
-        f"",
-        f'<a id="local-statistics"></a>',
-        f"## 📊 本地统计检测结果",
-        f"| 检测项 | 结果 | 状态 |",
-        f"|--------|------|------|",
-        f"| Benford分布偏差 | {round(stat_result['benford_deviation'],3) if stat_result['benford_deviation'] else '样本不足'} | {stat_result['benford_status'] or 'N/A'} |",
-        f"| p值数量/异常 | {stat_result['p_value_count']} / {stat_result['p_value_abnormal']}个>0.05 | {'⚠️异常' if stat_result['p_value_abnormal'] else '✅正常'} |",
-        f"| 标准差提及 | {stat_result['sd_count']}处 | N/A |",
-    ])
-    lines.append(f"| 提取数字数 | {stat_result['number_count']} | - |")
-
-    if stat_result.get("number_consistency"):
-        lines.append(f"| 数字自洽性 | {stat_result['number_consistency']} | ⚠️矛盾 |")
-
-    lines.append("")
+    lines.extend(_markdown_local_statistics_lines(stat_result))
 
     if report.get("parse_error"):
         lines.append("## ⚠️ LLM报告解析失败（原始输出）")

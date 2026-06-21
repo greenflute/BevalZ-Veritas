@@ -4628,6 +4628,28 @@ def test_markdown_report_metadata_lines_include_versions_scope_and_runtime():
     assert "**运行时UTC年份**: 2026" in joined
 
 
+def test_markdown_local_statistics_lines_include_numeric_status_rows():
+    lines = veritas.report_markdown._markdown_local_statistics_lines(
+        {
+            "benford_deviation": 0.12345,
+            "benford_status": "偏离",
+            "p_value_count": 4,
+            "p_value_abnormal": 2,
+            "sd_count": 3,
+            "number_count": 42,
+            "number_consistency": "Methods n=42, Results n=24",
+        }
+    )
+
+    joined = "\n".join(lines)
+    assert '<a id="local-statistics"></a>' in joined
+    assert "| Benford分布偏差 | 0.123 | 偏离 |" in joined
+    assert "| p值数量/异常 | 4 / 2个>0.05 | ⚠️异常 |" in joined
+    assert "| 标准差提及 | 3处 | N/A |" in joined
+    assert "| 提取数字数 | 42 | - |" in joined
+    assert "| 数字自洽性 | Methods n=42, Results n=24 | ⚠️矛盾 |" in joined
+
+
 def test_reports_include_review_overview_and_internal_evidence_links(tmp_path):
     stat = {
         "benford_deviation": None,
