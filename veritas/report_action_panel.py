@@ -10,66 +10,9 @@ def report_action_service_url(host="127.0.0.1", port=8765):
     return f"http://{host}:{int(port)}"
 
 
-def format_web_action_panel_html(report, pdf_path, meta, stat_result):
-    meta = meta or {}
-    service = meta.get("report_actions") or {}
-    host = service.get("host") or "127.0.0.1"
-    port = int(service.get("port") or 8765)
-    service_url = report_action_service_url(host, port)
-    generate_url = f"{service_url}/generate"
-    followups_url = f"{service_url}/followups"
-    context = _report_action_context(report, pdf_path, meta, stat_result or {})
-    context_json = _json_for_script_tag(context)
-    generate_url_json = _json_for_script_tag(generate_url)
-    followups_url_json = _json_for_script_tag(followups_url)
-    service_url_json = _json_for_script_tag(service_url)
-    startup_command_json = _json_for_script_tag(f"python paper_audit.py --serve-report-actions --report-actions-port {port}")
-    return f"""
-  <div class="section web-action-section">
-    <h2>一键生成后续沟通草稿</h2>
-    <p class="section-hint">草稿由本地配置的LLM生成。生成前请确认文章身份、证据范围和语气；生成后仍需人工核对。</p>
-    <div class="identity-grid" aria-label="文章身份确认">
-      <label>标题<input id="followup-title" type="text" placeholder="文章标题"></label>
-      <label>期刊<input id="followup-journal" type="text" placeholder="期刊"></label>
-      <label>作者<input id="followup-authors" type="text" placeholder="作者，逗号分隔"></label>
-      <label>DOI<input id="followup-doi" type="text" placeholder="DOI"></label>
-      <label>年份<input id="followup-year" type="text" placeholder="年份"></label>
-    </div>
-    <div class="web-action-toolbar">
-      <label class="inline-control">语言
-        <select id="draft-language" class="draft-language-select" aria-label="草稿语言">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
-      </label>
-      <label class="inline-control">语气
-        <select id="draft-tone" class="draft-language-select" aria-label="草稿语气">
-          <option value="conservative">保守</option>
-          <option value="standard">标准</option>
-          <option value="firm">强硬</option>
-        </select>
-      </label>
-      <button type="button" class="action-button" data-action-kind="pubpeer_comment">生成 PubPeer Comment</button>
-      <button type="button" class="action-button" data-action-kind="journal_letter">生成期刊 Letter</button>
-      <button type="button" class="secondary-button" id="copy-generated-draft">复制草稿</button>
-    </div>
-    <div class="evidence-picker">
-      <strong>写入草稿的证据</strong>
-      <div id="followup-evidence-list" class="evidence-choice-list"></div>
-    </div>
-    <label class="custom-concern-label">自定义关注点
-      <textarea id="custom-followup-concerns" class="custom-concern-input" placeholder="每行一个人工补充关注点，会标记为 user_added。"></textarea>
-    </label>
-    <label class="manual-confirmation">
-      <input id="manual-review-confirmation" type="checkbox">
-      我已确认文章身份、证据选择和语气设置；生成内容仅作为基于阅读和理解文章后的学术问题表达草稿，发送前仍需人工复核。
-    </label>
-    <div id="existing-followups" class="existing-followups"></div>
-    <div id="web-action-status" class="web-action-status">动作服务: <code>{_html_escape(service_url)}</code></div>
-    <textarea id="generated-draft" class="generated-draft" spellcheck="false" placeholder="生成的草稿会显示在这里，可直接编辑。"></textarea>
-  </div>
-  <script id="paper-audit-action-context" type="application/json">{context_json}</script>
-  <script>
+def _web_action_panel_script(generate_url_json, followups_url_json, service_url_json, startup_command_json):
+    """Return browser JavaScript for the saved-report follow-up action panel."""
+    return f"""  <script>
   (function() {{
     const statusEl = document.getElementById('web-action-status');
     const outputEl = document.getElementById('generated-draft');
@@ -259,3 +202,65 @@ def format_web_action_panel_html(report, pdf_path, meta, stat_result):
     loadExisting();
   }})();
   </script>"""
+
+
+def format_web_action_panel_html(report, pdf_path, meta, stat_result):
+    meta = meta or {}
+    service = meta.get("report_actions") or {}
+    host = service.get("host") or "127.0.0.1"
+    port = int(service.get("port") or 8765)
+    service_url = report_action_service_url(host, port)
+    generate_url = f"{service_url}/generate"
+    followups_url = f"{service_url}/followups"
+    context = _report_action_context(report, pdf_path, meta, stat_result or {})
+    context_json = _json_for_script_tag(context)
+    generate_url_json = _json_for_script_tag(generate_url)
+    followups_url_json = _json_for_script_tag(followups_url)
+    service_url_json = _json_for_script_tag(service_url)
+    startup_command_json = _json_for_script_tag(f"python paper_audit.py --serve-report-actions --report-actions-port {port}")
+    return f"""
+  <div class="section web-action-section">
+    <h2>一键生成后续沟通草稿</h2>
+    <p class="section-hint">草稿由本地配置的LLM生成。生成前请确认文章身份、证据范围和语气；生成后仍需人工核对。</p>
+    <div class="identity-grid" aria-label="文章身份确认">
+      <label>标题<input id="followup-title" type="text" placeholder="文章标题"></label>
+      <label>期刊<input id="followup-journal" type="text" placeholder="期刊"></label>
+      <label>作者<input id="followup-authors" type="text" placeholder="作者，逗号分隔"></label>
+      <label>DOI<input id="followup-doi" type="text" placeholder="DOI"></label>
+      <label>年份<input id="followup-year" type="text" placeholder="年份"></label>
+    </div>
+    <div class="web-action-toolbar">
+      <label class="inline-control">语言
+        <select id="draft-language" class="draft-language-select" aria-label="草稿语言">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <label class="inline-control">语气
+        <select id="draft-tone" class="draft-language-select" aria-label="草稿语气">
+          <option value="conservative">保守</option>
+          <option value="standard">标准</option>
+          <option value="firm">强硬</option>
+        </select>
+      </label>
+      <button type="button" class="action-button" data-action-kind="pubpeer_comment">生成 PubPeer Comment</button>
+      <button type="button" class="action-button" data-action-kind="journal_letter">生成期刊 Letter</button>
+      <button type="button" class="secondary-button" id="copy-generated-draft">复制草稿</button>
+    </div>
+    <div class="evidence-picker">
+      <strong>写入草稿的证据</strong>
+      <div id="followup-evidence-list" class="evidence-choice-list"></div>
+    </div>
+    <label class="custom-concern-label">自定义关注点
+      <textarea id="custom-followup-concerns" class="custom-concern-input" placeholder="每行一个人工补充关注点，会标记为 user_added。"></textarea>
+    </label>
+    <label class="manual-confirmation">
+      <input id="manual-review-confirmation" type="checkbox">
+      我已确认文章身份、证据选择和语气设置；生成内容仅作为基于阅读和理解文章后的学术问题表达草稿，发送前仍需人工复核。
+    </label>
+    <div id="existing-followups" class="existing-followups"></div>
+    <div id="web-action-status" class="web-action-status">动作服务: <code>{_html_escape(service_url)}</code></div>
+    <textarea id="generated-draft" class="generated-draft" spellcheck="false" placeholder="生成的草稿会显示在这里，可直接编辑。"></textarea>
+  </div>
+  <script id="paper-audit-action-context" type="application/json">{context_json}</script>
+{_web_action_panel_script(generate_url_json, followups_url_json, service_url_json, startup_command_json)}"""

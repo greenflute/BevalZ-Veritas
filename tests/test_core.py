@@ -5005,6 +5005,21 @@ def test_web_action_panel_uses_report_action_port():
     assert "127.0.0.1:8765" not in rendered
 
 
+def test_web_action_panel_script_contains_followup_actions_and_service_guidance():
+    script = veritas.report_action_panel._web_action_panel_script(
+        '"http://127.0.0.1:9123/generate"',
+        '"http://127.0.0.1:9123/followups"',
+        '"http://127.0.0.1:9123"',
+        '"python paper_audit.py --serve-report-actions --report-actions-port 9123"',
+    )
+
+    assert "const generateUrl = \"http://127.0.0.1:9123/generate\"" in script
+    assert "const followupsUrl = \"http://127.0.0.1:9123/followups\"" in script
+    assert "failed_report" not in script
+    assert "失败诊断报告不允许生成 PubPeer Comment 或期刊 Letter" in script
+    assert "navigator.clipboard.writeText" in script
+
+
 def test_web_action_context_script_contains_parseable_json():
     rendered = paper_audit.format_web_action_panel_html(
         {
