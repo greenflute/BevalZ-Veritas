@@ -27,7 +27,7 @@ veritas/
 ├── desktop_gui.py      # Desktop GUI helper boundary
 ├── evidence_chain.py   # Evidence-chain audit and evidence-cluster helpers
 ├── evidence_rendering.py # Evidence excerpt/table rendering helpers
-├── failed_diagnostics.py # Stable failed-audit payload and conversion helpers
+├── failed_diagnostics.py # Stable failed-audit payload, rendering, and conversion helpers
 ├── followups.py       # PubPeer/comment and journal-letter draft workflow helpers
 ├── html_utils.py       # HTML escaping and script-safe JSON helpers
 ├── image_cache.py      # Image audit cache key and fingerprint helpers
@@ -116,9 +116,9 @@ tests/
 - `veritas/artifacts.py` owns formal audit artifact path, limited-outcome, and
   coverage-blocking helpers; `paper_audit` keeps compatibility by re-exporting
   the same function objects through `veritas.legacy`.
-- `veritas/failed_diagnostics.py` owns stable failed-audit JSON payload and
-  failure-to-`AuditFailure` conversion helpers; Markdown/HTML formatting can
-  remain in `veritas.legacy` until renderer dependencies are untangled.
+- `veritas/failed_diagnostics.py` owns stable failed-audit JSON payload,
+  Markdown/HTML diagnostic rendering, failed artifact writes, and
+  failure-to-`AuditFailure` conversion helpers.
 - `veritas/html_utils.py` owns HTML escaping and script-safe JSON helpers used
   by renderers; these remain re-exported through `paper_audit` for
   compatibility while renderer extraction continues.
