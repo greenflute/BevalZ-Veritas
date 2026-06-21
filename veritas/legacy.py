@@ -2867,6 +2867,33 @@ def _run_image_audit_stage(input_path, output_dir, args, resume_dir, meta):
     return image_audit
 
 
+def _run_single_llm_review(audit_text, llm_cache_dir, allow_llm_cache_read, allow_llm_cache_write, resume_dir):
+    single_cache = llm_cache_dir / "chunk_0000.json"
+    cached = _json_load(single_cache) if allow_llm_cache_read else None
+    if cached:
+        print(f"🔁 断点续作：复用LLM审查缓存 {single_cache}")
+        resume_event(resume_dir, "stage3_llm_chunk", "cache_hit", "chunk=1/1", cache=str(single_cache))
+        return cached.get("report", {"parse_error": True, "raw_output": "缓存格式异常"})
+
+    raw_content = ""
+    report = {"parse_error": True, "raw_output": ""}
+    schema_errors = []
+    for schema_attempt in range(2):
+        raw_content = call_llm(audit_text)
+        report = parse_report(raw_content)
+        if not report.get("parse_error"):
+            break
+        schema_errors = report.get("schema_errors") or [report.get("raw_output", "")[:180]]
+        if schema_attempt == 0:
+            print(f"  ↻ LLM证据schema不合格，重试1次: {schema_errors}")
+    if report.get("parse_error"):
+        raise RuntimeError(f"LLM返回结构不符合证据schema: {schema_errors}")
+    if allow_llm_cache_write:
+        _json_save(single_cache, llm_success_cache_payload(report, raw_content))
+        resume_event(resume_dir, "stage3_llm_chunk", "saved", "chunk=1/1", cache=str(single_cache))
+    return report
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3387,42 +3414,20 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     if total_chunks == 1:
         # 短论文：直接全文审查
         print(f"🔍 论文长度({len(audit_text)}字符，已排除参考文献)在单块范围内，直接审查...")
-        single_cache = llm_cache_dir / "chunk_0000.json"
-        cached = _json_load(single_cache) if allow_llm_cache_read else None
-        if cached:
-            print(f"🔁 断点续作：复用LLM审查缓存 {single_cache}")
-            resume_event(resume_dir, "stage3_llm_chunk", "cache_hit", "chunk=1/1", cache=str(single_cache))
-            report = cached.get("report", {"parse_error": True, "raw_output": "缓存格式异常"})
-        else:
-            try:
-                raw_content = ""
-                report = {"parse_error": True, "raw_output": ""}
-                schema_errors = []
-                for schema_attempt in range(2):
-                    raw_content = call_llm(audit_text)
-                    report = parse_report(raw_content)
-                    if not report.get("parse_error"):
-                        break
-                    schema_errors = report.get("schema_errors") or [report.get("raw_output", "")[:180]]
-                    if schema_attempt == 0:
-                        print(f"  ↻ LLM证据schema不合格，重试1次: {schema_errors}")
-                if report.get("parse_error"):
-                    raise RuntimeError(f"LLM返回结构不符合证据schema: {schema_errors}")
-                if allow_llm_cache_write:
-                    _json_save(single_cache, llm_success_cache_payload(report, raw_content))
-                    resume_event(resume_dir, "stage3_llm_chunk", "saved", "chunk=1/1", cache=str(single_cache))
-            except Exception as e:
-                print(f"❌ LLM调用失败: {e}")
-                failure = AuditFailure(
-                    capability="text_llm",
-                    error_class="schema_error",
-                    message=f"LLM语义审查失败或返回结构不符合证据schema: {e}",
-                    fix_hints=["检查文本LLM服务稳定性和提示词输出格式。", "稍后重试或更换稳定的文本语义审查服务。"],
-                    completed_stages=completed_stages,
-                    retry_command=retry_command,
-                    details={"raw_error": str(e), "chunk": "1/1"},
-                )
-                return _fail_run(failure, diagnostics_meta=meta)
+        try:
+            report = _run_single_llm_review(audit_text, llm_cache_dir, allow_llm_cache_read, allow_llm_cache_write, resume_dir)
+        except Exception as e:
+            print(f"❌ LLM调用失败: {e}")
+            failure = AuditFailure(
+                capability="text_llm",
+                error_class="schema_error",
+                message=f"LLM语义审查失败或返回结构不符合证据schema: {e}",
+                fix_hints=["检查文本LLM服务稳定性和提示词输出格式。", "稍后重试或更换稳定的文本语义审查服务。"],
+                completed_stages=completed_stages,
+                retry_command=retry_command,
+                details={"raw_error": str(e), "chunk": "1/1"},
+            )
+            return _fail_run(failure, diagnostics_meta=meta)
     else:
         # 长论文：分块审查 + 合并
         print(f"🔍 论文较长({len(audit_text)}字符，已排除参考文献)，分为{total_chunks}块(每块≤{chunk_size}字符，重叠{overlap}字符)进行审查...")
