@@ -3658,6 +3658,59 @@ def _apply_image_risk_and_evidence_stages(input_path, output_dir, args, resume_d
     return {"report": report, "image_audit": image_audit}
 
 
+def _run_mineru_preflight_if_needed(use_mineru_default, preflight_state, record_preflight, retry_command, completed_stages, fail_run, preflight_results):
+    if not use_mineru_default:
+        return None
+    print("🧪 关键能力预检: MinerU")
+    mineru_preflight = run_preflight_once(preflight_state, "mineru", lambda: preflight_mineru(timeout=10))
+    record_preflight(mineru_preflight)
+    if not mineru_preflight.ok:
+        failure = preflight_failure_to_audit_failure(
+            mineru_preflight,
+            retry_command,
+            completed_stages,
+        )
+        failed_result = fail_run(
+            failure,
+            diagnostics_meta={"preflight_results": preflight_results},
+            workspace_meta={"preflight_results": preflight_results},
+            result_meta={"preflight_results": preflight_results},
+        )
+        print(
+            "❌ MinerU预检失败，未生成完整审查报告。失败诊断已保存: "
+            f"{failed_result.artifact_paths['markdown']}, {failed_result.artifact_paths['json']}"
+        )
+        return failed_result
+    completed_stages.append("mineru_preflight")
+    return None
+
+
+def _run_text_llm_preflight(preflight_state, record_preflight, retry_command, completed_stages, fail_run, preflight_results, meta):
+    print("🧪 关键能力预检: 文本语义审查LLM")
+    text_llm_preflight = run_preflight_once(preflight_state, "text_llm", lambda: preflight_text_llm(timeout=min(30, LLM_TIMEOUT)))
+    record_preflight(text_llm_preflight)
+    meta["preflight_results"] = preflight_results
+    if not text_llm_preflight.ok:
+        failure = preflight_failure_to_audit_failure(
+            text_llm_preflight,
+            retry_command,
+            completed_stages,
+        )
+        failed_result = fail_run(
+            failure,
+            diagnostics_meta=meta,
+            workspace_meta={"preflight_results": preflight_results},
+            result_meta={"preflight_results": preflight_results},
+        )
+        print(
+            "❌ 文本LLM预检失败，未生成完整审查报告。失败诊断已保存: "
+            f"{failed_result.artifact_paths['markdown']}, {failed_result.artifact_paths['json']}"
+        )
+        return failed_result
+    completed_stages.append("text_llm_preflight")
+    return None
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3712,28 +3765,17 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
             result_meta=result_meta,
         )
 
-    if use_mineru_default:
-        print("🧪 关键能力预检: MinerU")
-        mineru_preflight = run_preflight_once(preflight_state, "mineru", lambda: preflight_mineru(timeout=10))
-        _record_preflight(mineru_preflight)
-        if not mineru_preflight.ok:
-            failure = preflight_failure_to_audit_failure(
-                mineru_preflight,
-                retry_command,
-                completed_stages,
-            )
-            failed_result = _fail_run(
-                failure,
-                diagnostics_meta={"preflight_results": preflight_results},
-                workspace_meta={"preflight_results": preflight_results},
-                result_meta={"preflight_results": preflight_results},
-            )
-            print(
-                "❌ MinerU预检失败，未生成完整审查报告。失败诊断已保存: "
-                f"{failed_result.artifact_paths['markdown']}, {failed_result.artifact_paths['json']}"
-            )
-            return failed_result
-        completed_stages.append("mineru_preflight")
+    mineru_failed_result = _run_mineru_preflight_if_needed(
+        use_mineru_default,
+        preflight_state,
+        _record_preflight,
+        retry_command,
+        completed_stages,
+        _fail_run,
+        preflight_results,
+    )
+    if mineru_failed_result:
+        return mineru_failed_result
     progress_bar(0, 5, "初始化完成")
 
     # ─── 阶段1：文本提取（支持单个文件/整个论文目录） ───
@@ -3771,28 +3813,17 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     stat_result = _run_local_stat_stage(audit_text, resume_dir, completed_stages)
 
     # ─── 阶段3：智能分块 + LLM语义审查（冗余机制） ───
-    print("🧪 关键能力预检: 文本语义审查LLM")
-    text_llm_preflight = run_preflight_once(preflight_state, "text_llm", lambda: preflight_text_llm(timeout=min(30, LLM_TIMEOUT)))
-    _record_preflight(text_llm_preflight)
-    meta["preflight_results"] = preflight_results
-    if not text_llm_preflight.ok:
-        failure = preflight_failure_to_audit_failure(
-            text_llm_preflight,
-            retry_command,
-            completed_stages,
-        )
-        failed_result = _fail_run(
-            failure,
-            diagnostics_meta=meta,
-            workspace_meta={"preflight_results": preflight_results},
-            result_meta={"preflight_results": preflight_results},
-        )
-        print(
-            "❌ 文本LLM预检失败，未生成完整审查报告。失败诊断已保存: "
-            f"{failed_result.artifact_paths['markdown']}, {failed_result.artifact_paths['json']}"
-        )
-        return failed_result
-    completed_stages.append("text_llm_preflight")
+    text_llm_failed_result = _run_text_llm_preflight(
+        preflight_state,
+        _record_preflight,
+        retry_command,
+        completed_stages,
+        _fail_run,
+        preflight_results,
+        meta,
+    )
+    if text_llm_failed_result:
+        return text_llm_failed_result
 
     llm_result = _run_text_llm_review_stage(
         audit_text,
