@@ -796,6 +796,99 @@ def test_run_cache_use_manifest_records_versions(tmp_path):
     }
 
 
+def test_online_cache_state_loads_resume_cache_when_enabled(tmp_path):
+    resume_dir = tmp_path / ".paper_audit_resume"
+    resume_dir.mkdir()
+    cache_path = resume_dir / "reference_online_cache.json"
+    paper_audit._json_save(cache_path, {"ref": {"status": "verified"}})
+
+    state = paper_audit.online_cache_state(
+        resume_dir,
+        "reference_online_cache.json",
+        no_resume=False,
+        json_load=paper_audit._json_load,
+    )
+
+    assert state == {
+        "no_resume": False,
+        "path": cache_path,
+        "cache": {"ref": {"status": "verified"}},
+    }
+
+
+def test_online_cache_state_ignores_cache_when_resume_disabled(tmp_path):
+    resume_dir = tmp_path / ".paper_audit_resume"
+    resume_dir.mkdir()
+    paper_audit._json_save(resume_dir / "resource_online_cache.json", {"url": {"status": "ok"}})
+
+    state = paper_audit.online_cache_state(
+        resume_dir,
+        "resource_online_cache.json",
+        no_resume=True,
+        json_load=paper_audit._json_load,
+    )
+
+    assert state["cache"] == {}
+    assert state["no_resume"] is True
+
+
+def test_save_online_cache_result_persists_cache_and_records_event(tmp_path):
+    resume_dir = tmp_path / ".paper_audit_resume"
+    state = {
+        "no_resume": False,
+        "path": resume_dir / "reference_online_cache.json",
+        "cache": {"ref": {"status": "verified"}},
+    }
+    events = []
+
+    def fake_resume_event(resume_path, step, status, detail, **extra):
+        events.append((resume_path, step, status, detail, extra))
+
+    paper_audit.save_online_cache_result(
+        state,
+        {"online_checked": 3},
+        "stage1_reference_online",
+        "online_checked",
+        paper_audit._json_save,
+        fake_resume_event,
+        resume_dir,
+    )
+
+    assert paper_audit._json_load(resume_dir / "reference_online_cache.json") == {
+        "ref": {"status": "verified"},
+    }
+    assert events == [(
+        resume_dir,
+        "stage1_reference_online",
+        "saved",
+        "checked=3; cache_entries=1",
+        {"cache": str(resume_dir / "reference_online_cache.json")},
+    )]
+
+
+def test_save_online_cache_result_skips_when_resume_disabled(tmp_path):
+    resume_dir = tmp_path / ".paper_audit_resume"
+    state = {
+        "no_resume": True,
+        "path": resume_dir / "reference_online_cache.json",
+        "cache": {"ref": {"status": "verified"}},
+    }
+    events = []
+
+    paper_audit.save_online_cache_result(
+        state,
+        {"online_checked": 3},
+        "stage1_reference_online",
+        "online_checked",
+        paper_audit._json_save,
+        lambda *args, **kwargs: events.append((args, kwargs)),
+        resume_dir,
+    )
+
+    assert not (resume_dir / "reference_online_cache.json").exists()
+    assert events == []
+
+
 def test_image_audit_cache_state_merges_visible_and_resume_semantic_cache(tmp_path):
     output_dir = tmp_path / "out"
     resume_dir = output_dir / ".paper_audit_resume"
@@ -1369,6 +1462,8 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.stage1_extract_cache_state is paper_audit.stage1_extract_cache_state
     assert veritas.run_logging.extract_cache_payload is paper_audit.extract_cache_payload
     assert veritas.run_logging.run_cache_use_manifest is paper_audit.run_cache_use_manifest
+    assert veritas.run_logging.online_cache_state is paper_audit.online_cache_state
+    assert veritas.run_logging.save_online_cache_result is paper_audit.save_online_cache_result
     assert veritas.run_logging.image_audit_cache_state is paper_audit.image_audit_cache_state
     assert veritas.run_logging.image_semantic_cache_save_callback is paper_audit.image_semantic_cache_save_callback
     assert veritas.run_logging.image_detector_cache_save_callback is paper_audit.image_detector_cache_save_callback

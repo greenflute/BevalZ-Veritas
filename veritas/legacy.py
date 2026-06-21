@@ -168,6 +168,7 @@ from .run_logging import (
     image_audit_cache_state,
     image_detector_cache_save_callback,
     image_semantic_cache_save_callback,
+    online_cache_state,
     progress_bar,
     record_preflight_result,
     resume_event,
@@ -176,6 +177,7 @@ from .run_logging import (
     run_input_manifest,
     run_scope_flags_from_args,
     save_mineru_artifacts,
+    save_online_cache_result,
     setup_run_logging,
     stage1_extract_cache_state,
 )
@@ -4564,9 +4566,10 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
 
     # ─── 参考文献剥离与单独校检 ───
     audit_text, references_text = split_audit_and_reference_text(full_text, meta)
-    reference_online_cache_path = resume_dir / "reference_online_cache.json"
+    reference_online_cache_state = online_cache_state(resume_dir, "reference_online_cache.json", args.no_resume, _json_load)
+    reference_online_cache_path = reference_online_cache_state["path"]
     reference_online_enabled = bool(references_text) and not args.no_reference_online
-    reference_online_cache = {} if args.no_resume else (_json_load(reference_online_cache_path, {}) or {})
+    reference_online_cache = reference_online_cache_state["cache"]
     if reference_online_enabled:
         print(f"🔎 参考文献在线检索已启用: 上限{args.reference_online_limit}条, 超时{args.reference_timeout}s")
     reference_audit = audit_references(
@@ -4576,15 +4579,8 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         timeout=args.reference_timeout,
         cache=reference_online_cache,
     )
-    if reference_online_enabled and not args.no_resume:
-        _json_save(reference_online_cache_path, reference_online_cache)
-        resume_event(
-            resume_dir,
-            "stage1_reference_online",
-            "saved",
-            f"checked={reference_audit.get('online_checked', 0)}; cache_entries={len(reference_online_cache)}",
-            cache=str(reference_online_cache_path),
-        )
+    if reference_online_enabled:
+        save_online_cache_result(reference_online_cache_state, reference_audit, "stage1_reference_online", "online_checked", _json_save, resume_event, resume_dir)
     if references_text:
         meta["references_excluded_from_main_audit"] = True
         meta["reference_chars"] = len(references_text)
@@ -4599,8 +4595,8 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     completed_stages.append("stage1_reference_audit")
 
     # ─── 代码仓库与在线部署资源可用性校检 ───
-    resource_online_cache_path = resume_dir / "resource_online_cache.json"
-    resource_online_cache = {} if args.no_resume else (_json_load(resource_online_cache_path, {}) or {})
+    resource_online_cache_state = online_cache_state(resume_dir, "resource_online_cache.json", args.no_resume, _json_load)
+    resource_online_cache = resource_online_cache_state["cache"]
     resource_online_enabled = not getattr(args, "no_resource_online", False)
     resource_audit = audit_resources(
         full_text,
@@ -4608,15 +4604,8 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         timeout=getattr(args, "resource_timeout", 10),
         cache=resource_online_cache,
     )
-    if resource_online_enabled and not args.no_resume:
-        _json_save(resource_online_cache_path, resource_online_cache)
-        resume_event(
-            resume_dir,
-            "stage1_resource_online",
-            "saved",
-            f"checked={resource_audit.get('online_checked', 0)}; cache_entries={len(resource_online_cache)}",
-            cache=str(resource_online_cache_path),
-        )
+    if resource_online_enabled:
+        save_online_cache_result(resource_online_cache_state, resource_audit, "stage1_resource_online", "online_checked", _json_save, resume_event, resume_dir)
     meta["resource_count"] = resource_audit.get("resource_count", 0)
     meta["resource_audit"] = resource_audit
     if resource_audit.get("resource_count"):

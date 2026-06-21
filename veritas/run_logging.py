@@ -18,6 +18,8 @@ __all__ = [
     "stage1_extract_cache_state",
     "extract_cache_payload",
     "run_cache_use_manifest",
+    "online_cache_state",
+    "save_online_cache_result",
     "image_audit_cache_state",
     "image_semantic_cache_save_callback",
     "image_detector_cache_save_callback",
@@ -193,6 +195,33 @@ def run_cache_use_manifest(
         "extract_cache_version": extract_cache_version,
         "image_semantic_cache_version": image_semantic_cache_version,
     }
+
+
+def online_cache_state(resume_dir, filename, no_resume, json_load):
+    """Build and load a resume-scoped online-check cache."""
+    path = Path(resume_dir) / filename
+    cache = {} if no_resume else (json_load(path, {}) or {})
+    return {
+        "no_resume": bool(no_resume),
+        "path": path,
+        "cache": cache,
+    }
+
+
+def save_online_cache_result(cache_state, audit_result, step, checked_key, json_save, resume_event_func, resume_dir):
+    """Persist an online-check cache and record its resume event."""
+    if not cache_state or cache_state.get("no_resume"):
+        return
+    cache = cache_state["cache"]
+    path = cache_state["path"]
+    json_save(path, cache)
+    resume_event_func(
+        resume_dir,
+        step,
+        "saved",
+        f"checked={audit_result.get(checked_key, 0)}; cache_entries={len(cache)}",
+        cache=str(path),
+    )
 
 
 def image_audit_cache_state(output_dir, resume_dir, no_resume, json_load, load_merged_json_dicts):
