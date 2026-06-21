@@ -4931,13 +4931,15 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
             retry_command=retry_command,
             details=failed_details,
         )
-        md_path, json_path = save_failed_audit_diagnostics(failure, input_path, **failed_artifact_kwargs, meta=meta)
-        record_run_workspace_artifacts(run_workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-        return RunResult.failed(
+        return save_failed_run_result(
             failure,
-            {"markdown": str(md_path), "json": str(json_path)},
-            workspace=run_workspace,
-            meta={"input_path": str(input_path)},
+            input_path,
+            run_workspace,
+            save_failed_audit_diagnostics,
+            record_run_workspace_artifacts,
+            completed_stages=completed_stages,
+            failed_artifact_kwargs=failed_artifact_kwargs,
+            diagnostics_meta=meta,
         )
     report = apply_risk_rules(report, stat_result=stat_result, image_audit=meta.get("image_audit"))
     meta["risk_rule_version"] = RISK_RULE_VERSION
