@@ -482,6 +482,37 @@ def preflight_text_llm(timeout=10) -> PreflightResult:
     return preflight_text_llm_from_namespace(globals(), timeout=timeout)
 
 
+def _adapter_e2e_failed_result(input_path, workspace, completed_stages, retry_command, capability, result):
+    failure = adapter_failure_to_audit_failure(capability, result, retry_command, completed_stages)
+    md_path, json_path = save_failed_audit_diagnostics(failure, input_path)
+    record_run_workspace_artifacts(workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
+    return {
+        "outcome": "failed",
+        "capability": capability,
+        "md_path": md_path,
+        "json_path": json_path,
+        "workspace": workspace,
+    }
+
+
+def _adapter_e2e_complete_result(input_path, report, meta, stat_result, workspace, completed_stages):
+    md_path, html_path, json_path = audit_artifact_paths(input_path, artifact_type="complete")
+    md_path.write_text(format_report(report, str(input_path), meta, stat_result), encoding="utf-8")
+    html_path.write_text(format_html_report(report, str(input_path), meta, stat_result), encoding="utf-8")
+    json_path.write_text(
+        json.dumps({"report_type": "complete", "llm_report": report, "stat_result": stat_result, "meta": meta}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    record_run_workspace_artifacts(workspace, "complete", [md_path, html_path, json_path], meta={"completed_stages": completed_stages})
+    return {
+        "outcome": "complete",
+        "md_path": md_path,
+        "html_path": html_path,
+        "json_path": json_path,
+        "workspace": workspace,
+    }
+
+
 def run_adapter_e2e_audit(
     input_path: Path,
     adapters: AuditAdapters,
@@ -501,16 +532,7 @@ def run_adapter_e2e_audit(
     retry_command = default_retry_command(input_path)
 
     def fail(capability: str, result: AdapterResult):
-        failure = adapter_failure_to_audit_failure(capability, result, retry_command, completed_stages)
-        md_path, json_path = save_failed_audit_diagnostics(failure, input_path)
-        record_run_workspace_artifacts(workspace, "failed", [md_path, json_path], meta={"completed_stages": completed_stages})
-        return {
-            "outcome": "failed",
-            "capability": capability,
-            "md_path": md_path,
-            "json_path": json_path,
-            "workspace": workspace,
-        }
+        return _adapter_e2e_failed_result(input_path, workspace, completed_stages, retry_command, capability, result)
 
     if input_path.suffix.lower() == ".pdf":
         mineru_preflight = adapters.mineru.preflight()
@@ -566,21 +588,7 @@ def run_adapter_e2e_audit(
         "adapter_version": ADAPTER_VERSION,
         "risk_rule_version": RISK_RULE_VERSION,
     }, [])
-    md_path, html_path, json_path = audit_artifact_paths(input_path, artifact_type="complete")
-    md_path.write_text(format_report(report, str(input_path), meta, stat_result), encoding="utf-8")
-    html_path.write_text(format_html_report(report, str(input_path), meta, stat_result), encoding="utf-8")
-    json_path.write_text(
-        json.dumps({"report_type": "complete", "llm_report": report, "stat_result": stat_result, "meta": meta}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    record_run_workspace_artifacts(workspace, "complete", [md_path, html_path, json_path], meta={"completed_stages": completed_stages})
-    return {
-        "outcome": "complete",
-        "md_path": md_path,
-        "html_path": html_path,
-        "json_path": json_path,
-        "workspace": workspace,
-    }
+    return _adapter_e2e_complete_result(input_path, report, meta, stat_result, workspace, completed_stages)
 
 
 # ─── 欺诈模式知识库加载 ───
