@@ -692,6 +692,45 @@ def test_extract_cache_matches_requires_input_mineru_and_version(tmp_path):
     assert paper_audit.extract_cache_matches(None, input_path, True, 7) is False
 
 
+def test_stage1_extract_cache_state_normalizes_matching_cache(tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("pdf", encoding="utf-8")
+    meta = {"total_chars": 3}
+    file_texts = [{"file": "paper.pdf", "text": "abc"}]
+    cached = {
+        "input": str(input_path.resolve()),
+        "use_mineru": True,
+        "cache_version": 7,
+        "full_text": "abc",
+        "meta": meta,
+        "file_texts": file_texts,
+    }
+
+    state = paper_audit.stage1_extract_cache_state(cached, input_path, True, 7)
+
+    assert state == {
+        "full_text": "abc",
+        "meta": meta,
+        "file_texts": file_texts,
+        "raw_pdf": None,
+        "use_mineru": True,
+    }
+
+
+def test_stage1_extract_cache_state_rejects_mismatched_cache(tmp_path):
+    input_path = tmp_path / "paper.pdf"
+    input_path.write_text("pdf", encoding="utf-8")
+    cached = {
+        "input": str(input_path.resolve()),
+        "use_mineru": True,
+        "cache_version": 7,
+        "full_text": "abc",
+    }
+
+    assert paper_audit.stage1_extract_cache_state(cached, input_path, False, 7) is None
+    assert paper_audit.stage1_extract_cache_state(cached, input_path, True, 8) is None
+
+
 def test_extract_cache_payload_records_stage1_cache_fields(tmp_path):
     input_path = tmp_path / "paper.pdf"
     input_path.write_text("pdf", encoding="utf-8")
@@ -1228,6 +1267,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging._allow_llm_cache_read is paper_audit._allow_llm_cache_read
     assert veritas.run_logging.detect_pdf_input is paper_audit.detect_pdf_input
     assert veritas.run_logging.extract_cache_matches is paper_audit.extract_cache_matches
+    assert veritas.run_logging.stage1_extract_cache_state is paper_audit.stage1_extract_cache_state
     assert veritas.run_logging.extract_cache_payload is paper_audit.extract_cache_payload
     assert veritas.run_logging.run_cache_use_manifest is paper_audit.run_cache_use_manifest
     assert veritas.run_logging.run_input_manifest is paper_audit.run_input_manifest

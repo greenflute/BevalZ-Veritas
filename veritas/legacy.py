@@ -174,6 +174,7 @@ from .run_logging import (
     run_scope_flags_from_args,
     save_mineru_artifacts,
     setup_run_logging,
+    stage1_extract_cache_state,
 )
 from .run_failures import save_failed_run_result
 from . import risk_rules as _risk_rules
@@ -4162,12 +4163,13 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
     extract_cache_path = resume_dir / "stage1_extract.json"
     cached_extract = None if args.no_resume else _json_load(extract_cache_path)
     extracted_file_texts = []
-    if extract_cache_matches(cached_extract, input_path, use_mineru_default, EXTRACT_CACHE_VERSION):
-        full_text = cached_extract.get("full_text", "")
-        meta = cached_extract.get("meta", {})
-        extracted_file_texts = cached_extract.get("file_texts") or []
-        raw_pdf = None
-        use_mineru = cached_extract.get("use_mineru", use_mineru_default)
+    cache_state = stage1_extract_cache_state(cached_extract, input_path, use_mineru_default, EXTRACT_CACHE_VERSION)
+    if cache_state:
+        full_text = cache_state["full_text"]
+        meta = cache_state["meta"]
+        extracted_file_texts = cache_state["file_texts"]
+        raw_pdf = cache_state["raw_pdf"]
+        use_mineru = cache_state["use_mineru"]
         print(f"🔁 断点续作：复用阶段1文本缓存 {extract_cache_path} ({len(full_text)}字符)")
         resume_event(resume_dir, "stage1_extract", "cache_hit", f"chars={len(full_text)}", cache=str(extract_cache_path))
         progress_bar(1, 5, "阶段1/5 文本提取缓存命中")

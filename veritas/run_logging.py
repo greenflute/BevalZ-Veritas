@@ -15,6 +15,7 @@ __all__ = [
     "_allow_llm_cache_read",
     "detect_pdf_input",
     "extract_cache_matches",
+    "stage1_extract_cache_state",
     "extract_cache_payload",
     "run_cache_use_manifest",
     "run_input_manifest",
@@ -119,6 +120,19 @@ def extract_cache_matches(cached_extract, input_path, use_mineru, cache_version)
         and cached_extract.get("use_mineru") == use_mineru
         and cached_extract.get("cache_version") == cache_version
     )
+
+
+def stage1_extract_cache_state(cached_extract, input_path, use_mineru_default, cache_version):
+    """Return normalized stage-1 extraction state for a matching cache payload."""
+    if not extract_cache_matches(cached_extract, input_path, use_mineru_default, cache_version):
+        return None
+    return {
+        "full_text": cached_extract.get("full_text", ""),
+        "meta": cached_extract.get("meta", {}),
+        "file_texts": cached_extract.get("file_texts") or [],
+        "raw_pdf": None,
+        "use_mineru": cached_extract.get("use_mineru", use_mineru_default),
+    }
 
 
 def extract_cache_payload(
