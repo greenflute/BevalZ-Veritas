@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from .file_utils import _json_load, _json_save
+from .namespace_utils import namespace_value as _namespace_value
 from .text_utils import _brief_text
 
 
@@ -286,10 +287,6 @@ def save_followup_artifacts(kind, context, language, text, model=""):
         "draft_path": str(draft_path),
         "log_path": str(log_path),
     }
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def save_followup_artifacts_from_namespace(namespace, kind, context, language, text):

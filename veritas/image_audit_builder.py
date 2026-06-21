@@ -12,12 +12,9 @@ from .image_selection import (
     _image_semantic_priority_key,
 )
 from .limit_utils import _effective_limit
+from .namespace_utils import namespace_value as _namespace_value
 
 __all__ = ["build_image_audit_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _run_semantic_image_checks(

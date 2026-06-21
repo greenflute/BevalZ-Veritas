@@ -6,6 +6,7 @@ from .cross_file_consistency import format_cross_file_consistency_markdown
 from .evidence_chain import format_evidence_chain_audit_markdown
 from .image_reporting import format_image_audit_markdown
 from .markdown_utils import _md_escape_cell
+from .namespace_utils import namespace_value as _namespace_value
 from .project_files import normalize_run_meta
 from .reference_reporting import format_reference_audit_markdown
 from .report_checks import (
@@ -23,10 +24,6 @@ from .text_utils import _brief_text
 from .versions import ADAPTER_VERSION, PROMPT_VERSION, RISK_RULE_VERSION, SCHEMA_VERSION
 
 __all__ = ["format_report_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _markdown_report_metadata_lines(

@@ -4,6 +4,7 @@ import json
 import urllib.parse
 
 from .http_client import _http_request
+from .namespace_utils import namespace_value as _namespace_value
 from .reference_parsing import (
     _crossref_work_to_match,
     _html_title,
@@ -24,10 +25,6 @@ __all__ = [
     "lookup_official_site_reference_from_namespace",
     "verify_reference_online_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _reference_get_json_from_namespace(namespace, url, timeout=10, headers=None):

@@ -2,6 +2,7 @@
 
 from .evidence_rendering import render_evidence_html, render_evidence_summary_html
 from .html_utils import _html_escape
+from .namespace_utils import namespace_value as _namespace_value
 from .report_checks import (
     _check_reason,
     _check_sort_key,
@@ -15,10 +16,6 @@ from .report_checks import (
 from .text_utils import _brief_text
 
 __all__ = ["format_html_check_sections_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _format_html_parse_error_section(report, html_escape):

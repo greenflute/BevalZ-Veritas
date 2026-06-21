@@ -2,6 +2,7 @@
 
 import re
 
+from .namespace_utils import namespace_value as _namespace_value
 from .resource_parsing import _clean_resource_url, extract_paper_resources
 from .text_utils import _brief_text
 
@@ -9,10 +10,6 @@ __all__ = [
     "verify_resource_availability_from_namespace",
     "audit_resources_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def verify_resource_availability_from_namespace(namespace, resource, timeout=10):

@@ -9,6 +9,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from .namespace_utils import namespace_value as _namespace_value
 from .report_action_panel import report_action_service_url
 from .text_utils import _brief_text
 
@@ -21,10 +22,6 @@ __all__ = [
     "_read_json_request_body",
     "serve_report_actions_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def report_action_service_health(host="127.0.0.1", port=8765, timeout=0.5):

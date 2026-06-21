@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from .namespace_utils import namespace_value as _namespace_value
+
 DEFAULT_MIN_IMAGE_BYTES = 5000
 
 __all__ = [
@@ -9,10 +11,6 @@ __all__ = [
     "analyze_image_reasonability",
     "analyze_image_reasonability_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def analyze_image_reasonability(image_path: str, min_image_bytes=DEFAULT_MIN_IMAGE_BYTES):

@@ -6,6 +6,7 @@ import urllib.parse
 from .external_timeout import _run_with_alarm_timeout
 from .image_payloads import _prepare_detector_upload_file
 from .image_results import _detector_timeout_result, _normalize_detector_result
+from .namespace_utils import namespace_value as _namespace_value
 
 DEFAULT_IMAGE_DETECT_URL = "https://imagedetector.com/"
 DEFAULT_IMAGE_DETECT_UPLOAD_BASE = "https://ai-image-detector-prod.nyc3.digitaloceanspaces.com"
@@ -16,10 +17,6 @@ __all__ = [
     "call_imagedetector_from_namespace",
     "_call_imagedetector_unbounded_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def call_imagedetector_from_namespace(namespace, image_path: str, timeout=60):

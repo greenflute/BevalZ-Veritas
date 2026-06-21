@@ -6,6 +6,7 @@ from pathlib import Path
 from .external_timeout import _run_with_alarm_timeout
 from .image_payloads import _image_to_data_url
 from .image_results import _extract_json_object, _glm_error_result, _glm_timeout_result, _normalize_glm_image_result
+from .namespace_utils import namespace_value as _namespace_value
 from .preflight import _chat_completions_endpoint
 from .runtime_config import DEFAULT_IMAGE_SEMANTIC_API_URL, DEFAULT_IMAGE_SEMANTIC_MODEL
 from .text_utils import _brief_text
@@ -21,10 +22,6 @@ __all__ = [
     "call_glm_image_semantics_from_namespace",
     "_call_glm_image_semantics_unbounded_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _glm_image_semantic_prompt():

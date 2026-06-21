@@ -47,6 +47,7 @@ veritas/
 ├── markdown_utils.py   # Shared Markdown table rendering helpers
 ├── mineru_text.py      # MinerU structured content-list text formatting helpers
 ├── models.py           # Stable dataclass/report models and model conversion
+├── namespace_utils.py  # Shared helpers for namespace-aware compatibility seams
 ├── paper_identity.py   # Best-effort article identity extraction helpers
 ├── pattern_updates.py  # PubPeer-to-fraud-pattern knowledge-base update helpers
 ├── preflight.py        # Critical capability preflight boundary
@@ -102,6 +103,11 @@ tests/
 - Production adapters for provider functions that have not moved out of legacy
   should use call-time legacy proxies so constructing `default_audit_adapters()`
   does not import `veritas.legacy`.
+- Namespace-aware compatibility seams should use
+  `veritas.namespace_utils.namespace_value` for globals-like lookup. Do not
+  duplicate private `_namespace_value` implementations across boundary modules;
+  the shared helper preserves both mapping and attribute-object namespaces used
+  by legacy monkeypatch tests.
 - Renderer-facing code should accept stable dataclass models or dictionaries and
   normalize at the renderer boundary.
 - Run orchestration state that crosses multiple helper calls should use stable

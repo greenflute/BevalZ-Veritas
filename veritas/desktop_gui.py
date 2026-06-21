@@ -6,6 +6,7 @@ import re
 import webbrowser
 from pathlib import Path
 
+from .namespace_utils import namespace_value as _namespace_value
 from .runtime_config import DEFAULT_LLM_API_URL, DEFAULT_LLM_MODEL
 
 DESKTOP_GUI_ARTIFACT_LABELS = {
@@ -202,10 +203,6 @@ def desktop_gui_config_snapshot(config, preflight_results=None):
         return {"summary": "不可用", "rows": []}
     suffix = " · 待配置" if not config.get("ok", True) else ""
     return {"summary": f"{ready_count}/{len(rows)} 正常{suffix}", "rows": rows}
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def desktop_gui_checked_config_snapshot_from_namespace(namespace, llm_preflight_runner=None, mineru_preflight_runner=None, timeout=6):

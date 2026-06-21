@@ -6,11 +6,9 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from .namespace_utils import namespace_value as _namespace_value
+
 __all__ = ["update_patterns_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _extract_pattern_json_array(content, json_module=json, re_module=re):

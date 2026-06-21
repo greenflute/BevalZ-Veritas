@@ -3,15 +3,12 @@
 import concurrent.futures
 
 from .limit_utils import _effective_limit
+from .namespace_utils import namespace_value as _namespace_value
 from .reference_parsing import build_reference_query, parse_references, reference_cache_key
 from .runtime_metadata import runtime_utc_year
 from .text_utils import _brief_text
 
 __all__ = ["audit_references_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def _reference_base_issues(ref, current_year):

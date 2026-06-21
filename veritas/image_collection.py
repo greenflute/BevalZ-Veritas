@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 from .file_utils import _safe_name
+from .namespace_utils import namespace_value as _namespace_value
 
 DEFAULT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".tif", ".webp"}
 DEFAULT_MIN_IMAGE_BYTES = 5000
@@ -23,12 +24,6 @@ __all__ = [
     "collect_mineru_image_files_from_namespace",
     "_latest_mineru_zips",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    if isinstance(namespace, dict):
-        return namespace.get(name, default)
-    return getattr(namespace, name, default)
 
 
 def _dedupe_paths(paths: Iterable) -> List[str]:

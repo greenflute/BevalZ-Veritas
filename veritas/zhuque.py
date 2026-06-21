@@ -4,13 +4,11 @@ import platform
 import subprocess
 import webbrowser
 
+from .namespace_utils import namespace_value as _namespace_value
+
 ZHUQUE_URL = "https://matrix.tencent.com/ai-detect/"
 
 __all__ = ["ZHUQUE_URL", "copy_to_clipboard_from_namespace", "launch_zhuque_ai_detect_from_namespace"]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def copy_to_clipboard_from_namespace(namespace, text: str) -> bool:

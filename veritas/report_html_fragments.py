@@ -1,6 +1,7 @@
 """Small HTML report fragment builders."""
 
 from .html_utils import _html_escape
+from .namespace_utils import namespace_value as _namespace_value
 
 __all__ = [
     "build_html_report_body_from_namespace",
@@ -8,10 +9,6 @@ __all__ = [
     "build_html_report_head",
     "build_html_status_fragments_from_namespace",
 ]
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def build_html_status_fragments_from_namespace(namespace, report, meta, stat_result):

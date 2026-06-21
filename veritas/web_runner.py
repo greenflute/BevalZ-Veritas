@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .artifacts import _artifact_base_from_output
 from .file_utils import _safe_name
+from .namespace_utils import namespace_value as _namespace_value
 from .text_utils import _brief_text
 
 
@@ -54,10 +55,6 @@ def web_runner_default_output_stem(input_path, timestamp=None):
     parent, project = _web_runner_input_parts(input_path)
     stamp = timestamp or _web_runner_timestamp()
     return str(parent / f"{project}_{stamp}" / "audit_report")
-
-
-def _namespace_value(namespace, name, default=None):
-    return (namespace or {}).get(name, default)
 
 
 def web_runner_default_output_stem_from_namespace(namespace, input_path, timestamp=None):

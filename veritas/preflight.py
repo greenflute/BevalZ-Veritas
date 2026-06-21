@@ -5,6 +5,7 @@ from typing import Any, Dict
 import requests
 
 from .failed_diagnostics import preflight_failure_to_audit_failure
+from .namespace_utils import namespace_value as _namespace_value
 from .preflight_types import PreflightResult, run_preflight_once
 from .runtime_config import (
     DEFAULT_IMAGE_SEMANTIC_API_URL,
@@ -32,10 +33,6 @@ def _chat_completions_endpoint(api_url: str) -> str:
     if base.endswith("/chat/completions"):
         return base
     return f"{base}/chat/completions"
-
-
-def _namespace_value(namespace: Dict[str, Any], name: str, default=""):
-    return (namespace or {}).get(name, default)
 
 
 def preflight_mineru_from_namespace(namespace: Dict[str, Any] = None, timeout=10) -> PreflightResult:

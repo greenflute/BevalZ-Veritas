@@ -3,6 +3,7 @@
 import hashlib
 from pathlib import Path
 
+from .namespace_utils import namespace_value as _namespace_value
 from .preflight import _chat_completions_endpoint
 
 __all__ = [
@@ -19,12 +20,6 @@ def _default_text_fingerprint(text: str, extra: str = ""):
     h.update(b"\n---TEXT---\n")
     h.update((text or "").encode("utf-8", errors="ignore"))
     return h.hexdigest()
-
-
-def _namespace_value(namespace, name, default=None):
-    if isinstance(namespace, dict):
-        return namespace.get(name, default)
-    return getattr(namespace, name, default)
 
 
 def _image_file_fingerprint(image_path: str, cache_version, text_fingerprint_func=None):
