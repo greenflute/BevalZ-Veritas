@@ -857,6 +857,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.local_analysis.extract_all_numbers is paper_audit.extract_all_numbers
     assert veritas.local_analysis.local_stat_check is paper_audit.local_stat_check
     assert veritas.local_analysis.smart_chunk_text is paper_audit.smart_chunk_text
+    assert callable(veritas.pattern_updates.update_patterns_from_namespace)
     assert veritas.project_files.SUPPORTED_TEXT_FILE_EXTENSIONS is paper_audit.SUPPORTED_TEXT_FILE_EXTENSIONS
     assert veritas.project_files.find_project_files is paper_audit.find_project_files
     assert veritas.project_files._main_paper_score is paper_audit._main_paper_score
@@ -1019,6 +1020,49 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.web_runner.web_runner_cors_headers is paper_audit.web_runner_cors_headers
     assert callable(veritas.web_runner.web_runner_default_output_stem_from_namespace)
     assert callable(veritas.web_runner.web_runner_config_status_from_namespace)
+
+
+def test_update_patterns_uses_namespace_and_fake_llm(monkeypatch, tmp_path):
+    comments_path = tmp_path / "pubpeer.txt"
+    comments_path.write_text("This PubPeer thread describes duplicated western blot panels.", encoding="utf-8")
+    patterns_path = tmp_path / "fraud_patterns.json"
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            content = json.dumps([
+                {
+                    "id": "DUPLICATED_BLOT",
+                    "category": "图片与图表",
+                    "name": "重复印迹图",
+                    "description": "不同条件下复用相同western blot面板。",
+                    "detection_hint": "比对条带形状和背景噪声。",
+                    "risk_level": "高",
+                }
+            ])
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+
+    def fake_urlopen(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr(paper_audit, "FRAUD_PATTERNS_PATH", patterns_path)
+    monkeypatch.setattr(paper_audit, "LLM_API_URL", "https://llm.example.test/chat")
+    monkeypatch.setattr(paper_audit, "LLM_API_KEY", "test-key")
+    monkeypatch.setattr(paper_audit, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(paper_audit.urllib.request, "urlopen", fake_urlopen)
+
+    result = paper_audit.update_patterns(comments_path)
+
+    saved = json.loads(patterns_path.read_text(encoding="utf-8"))
+    assert result == 0
+    assert captured["url"] == "https://llm.example.test/chat"
+    assert captured["timeout"] == 60
+    assert captured["payload"]["model"] == "test-model"
+    assert saved["patterns"][0]["id"] == "DUPLICATED_BLOT"
+    assert saved["patterns"][0]["risk_level"] == "高"
 
 
 def test_http_request_uses_browser_user_agent_without_network(monkeypatch):

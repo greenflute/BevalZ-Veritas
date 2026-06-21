@@ -48,6 +48,7 @@ veritas/
 ├── mineru_text.py      # MinerU structured content-list text formatting helpers
 ├── models.py           # Stable dataclass/report models and model conversion
 ├── paper_identity.py   # Best-effort article identity extraction helpers
+├── pattern_updates.py  # PubPeer-to-fraud-pattern knowledge-base update helpers
 ├── preflight.py        # Critical capability preflight boundary
 ├── project_files.py    # Project file discovery and run metadata helpers
 ├── reference_audit.py  # Reference plausibility audit orchestration
@@ -245,6 +246,12 @@ tests/
 - `veritas/paper_identity.py` owns best-effort article title, journal, and
   author extraction for follow-up draft context. It should stay deterministic
   and may reuse evidence cleanup helpers, but must not call providers.
+- `veritas/pattern_updates.py` owns the `--update-patterns` PubPeer-comment
+  knowledge-base update flow, including prompt construction, LLM response JSON
+  extraction, duplicate ID filtering, and `fraud_patterns.json` writes.
+  `veritas.legacy` should wrap it with globals so historical monkeypatches of
+  LLM endpoint/model/key, `urllib.request`, and `FRAUD_PATTERNS_PATH` continue
+  to affect the CLI helper.
 - `veritas/reference_parsing.py` owns deterministic reference-section splitting,
   offline bibliography parsing, DOI/title/author/container/year hint extraction,
   author similarity, reference query/cache-key construction, official-site
