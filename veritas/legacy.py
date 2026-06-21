@@ -285,7 +285,7 @@ from .report_checks import (
     _merged_group_summary_text,
     _sanitize_reason_text,
 )
-from .report_html_fragments import build_html_report_body_from_namespace, build_html_status_fragments_from_namespace
+from .report_html_fragments import build_html_report_body_from_namespace, build_html_report_context_from_namespace, build_html_status_fragments_from_namespace
 from .report_html_sections import format_html_check_sections_from_namespace
 from .report_markdown import format_report_from_namespace
 from .report_action_context import _report_action_context
@@ -2880,43 +2880,8 @@ def format_report(report, pdf_path, meta, stat_result):
 
 def format_html_report(report, pdf_path, meta, stat_result):
     """将审查结果格式化为紧凑、可审阅的HTML报告"""
-    meta = normalize_run_meta(meta, pdf_path)
-    risk_colors = {"高": "#b42318", "中": "#a16207", "低": "#166534", "严重证据冲突": "#111827"}
-    risk_icons = {"高": "高复核优先级", "中": "中复核优先级", "低": "低复核优先级", "严重证据冲突": "严重证据冲突"}
-    risk = report.get('risk_level', '未知')
-    risk_color = risk_colors.get(risk, "#6b7280")
-    risk_icon = risk_icons.get(risk, "未知风险")
-    artifact_type = meta.get("artifact_type") or "complete"
-    artifact_label = "范围受限审查 (limited)" if artifact_type == "limited" else "完整审查 (complete)"
-    artifact_badge = "范围受限 limited" if artifact_type == "limited" else "完整审查 complete"
-    artifact_color = "#8a5a00" if artifact_type == "limited" else "#166534"
-    runtime = meta.get("runtime") or {}
-
-    # 统计检测状态
-    benford_val = round(stat_result['benford_deviation'], 3) if stat_result['benford_deviation'] else '样本不足'
-    benford_status = stat_result.get('benford_status', 'N/A') or 'N/A'
-    p_abnormal = stat_result['p_value_abnormal']
-    p_status_class = "status-warn" if p_abnormal else "status-ok"
-
-    status_fragments = build_html_status_fragments_from_namespace(globals(), report, meta, stat_result)
-    limited_notice = status_fragments["limited_notice"]
-    chunk_info = status_fragments["chunk_info"]
-    number_consistency = status_fragments["number_consistency"]
-    coverage_banner = status_fragments["coverage_banner"]
-    score_breakdown_html = status_fragments["score_breakdown_html"]
-    action_summary_html = format_audit_action_summary_html(report, meta, stat_result) if not report.get("parse_error") else ""
-    review_overview_html = format_review_overview_html(report, meta, stat_result) if not report.get("parse_error") else ""
-    resource_audit_html = format_resource_audit_html(meta.get("resource_audit"))
-    reference_audit_html = format_reference_audit_html(meta.get("reference_audit"))
-    image_audit_html = format_image_audit_html(meta.get("image_audit"))
-    cross_file_audit_html = format_cross_file_consistency_html(meta.get("cross_file_consistency_audit"))
-    evidence_chain_audit_html = format_evidence_chain_audit_html(meta.get("evidence_chain_audit"))
-    web_action_panel_html = format_web_action_panel_html(report, pdf_path, meta, stat_result) if not report.get("parse_error") else ""
-    summary_text = _html_escape(report.get('summary', 'N/A'))
-    extracted_chars = meta.get('total_chars', meta.get('chars', 'N/A'))
-    extraction_method = meta.get('extraction_method', meta.get('source', 'N/A'))
-
-    checks_html, conclusion_html = format_html_check_sections_from_namespace(globals(), report)
+    context = build_html_report_context_from_namespace(globals(), report, pdf_path, meta, stat_result)
+    risk_color = context["risk_color"]
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -3882,7 +3847,7 @@ def format_html_report(report, pdf_path, meta, stat_result):
   }}
 </style>
 </head>
-{build_html_report_body_from_namespace(globals(), locals())}"""
+{build_html_report_body_from_namespace(globals(), context)}"""
     return html
 
 

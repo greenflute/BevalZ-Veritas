@@ -874,6 +874,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.report_checks._check_reason is paper_audit._check_reason
     assert veritas.report_checks._merged_group_html is paper_audit._merged_group_html
     assert callable(veritas.report_html_fragments.build_html_report_body_from_namespace)
+    assert callable(veritas.report_html_fragments.build_html_report_context_from_namespace)
     assert callable(veritas.report_html_fragments.build_html_status_fragments_from_namespace)
     assert callable(veritas.report_html_sections.format_html_check_sections_from_namespace)
     assert callable(veritas.report_markdown.format_report_from_namespace)
