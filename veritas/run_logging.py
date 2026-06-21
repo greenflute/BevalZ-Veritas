@@ -23,6 +23,7 @@ __all__ = [
     "apply_llm_chunk_coverage_meta",
     "llm_success_cache_payload",
     "llm_failure_cache_payload",
+    "llm_chunk_cache_read_state",
     "online_cache_state",
     "save_online_cache_result",
     "image_audit_cache_state",
@@ -309,6 +310,52 @@ def llm_failure_cache_payload(error, chunk_index, total_chunks, status, first_er
     if first_error is not None:
         payload["first_error"] = first_error
     return payload
+
+
+def llm_chunk_cache_read_state(
+    llm_cache_dir,
+    chunk_idx,
+    total_chunks,
+    allow_llm_cache_read,
+    llm_cache_only,
+    json_load,
+    resume_event_func,
+    resume_dir,
+):
+    """Return cache status for one text-LLM chunk and record resume events."""
+    chunk_cache = Path(llm_cache_dir) / f"chunk_{chunk_idx:04d}.json"
+    cached = json_load(chunk_cache) if allow_llm_cache_read else None
+    if cached and cached.get("status") == "ok" and cached.get("report") and not cached.get("report", {}).get("parse_error"):
+        resume_event_func(
+            resume_dir,
+            "stage3_llm_chunk",
+            "cache_hit",
+            f"chunk={chunk_idx+1}/{total_chunks}",
+            cache=str(chunk_cache),
+        )
+        return {
+            "status": "cache_hit",
+            "cache_path": chunk_cache,
+            "report": cached.get("report"),
+        }
+    if llm_cache_only:
+        resume_event_func(
+            resume_dir,
+            "stage3_llm_chunk",
+            "cache_only_miss",
+            f"chunk={chunk_idx+1}/{total_chunks}",
+            cache=str(chunk_cache),
+        )
+        return {
+            "status": "cache_only_miss",
+            "cache_path": chunk_cache,
+            "first_error": "cache_only_no_success_cache",
+        }
+    return {
+        "status": "call_required",
+        "cache_path": chunk_cache,
+        "report": None,
+    }
 
 
 def online_cache_state(resume_dir, filename, no_resume, json_load):

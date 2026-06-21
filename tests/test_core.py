@@ -954,6 +954,103 @@ def test_llm_failure_cache_payload_records_status_and_first_error():
     }
 
 
+def test_llm_chunk_cache_read_state_reuses_success_cache(tmp_path):
+    events = []
+    report = {"risk_level": "高"}
+    cache_path = tmp_path / "chunk_0002.json"
+
+    def fake_json_load(path):
+        assert path == cache_path
+        return {"status": "ok", "report": report}
+
+    def fake_resume_event(resume_dir, step, status, detail, **extra):
+        events.append((resume_dir, step, status, detail, extra))
+
+    state = paper_audit.llm_chunk_cache_read_state(
+        tmp_path,
+        chunk_idx=2,
+        total_chunks=5,
+        allow_llm_cache_read=True,
+        llm_cache_only=False,
+        json_load=fake_json_load,
+        resume_event_func=fake_resume_event,
+        resume_dir=tmp_path / "resume",
+    )
+
+    assert state == {
+        "status": "cache_hit",
+        "cache_path": cache_path,
+        "report": report,
+    }
+    assert events == [
+        (
+            tmp_path / "resume",
+            "stage3_llm_chunk",
+            "cache_hit",
+            "chunk=3/5",
+            {"cache": str(cache_path)},
+        )
+    ]
+
+
+def test_llm_chunk_cache_read_state_marks_cache_only_miss(tmp_path):
+    events = []
+
+    def fake_resume_event(resume_dir, step, status, detail, **extra):
+        events.append((step, status, detail, extra))
+
+    state = paper_audit.llm_chunk_cache_read_state(
+        tmp_path,
+        chunk_idx=0,
+        total_chunks=2,
+        allow_llm_cache_read=True,
+        llm_cache_only=True,
+        json_load=lambda path: {"status": "failed_final", "report": {"parse_error": True}},
+        resume_event_func=fake_resume_event,
+        resume_dir=tmp_path / "resume",
+    )
+
+    assert state == {
+        "status": "cache_only_miss",
+        "cache_path": tmp_path / "chunk_0000.json",
+        "first_error": "cache_only_no_success_cache",
+    }
+    assert events == [
+        (
+            "stage3_llm_chunk",
+            "cache_only_miss",
+            "chunk=1/2",
+            {"cache": str(tmp_path / "chunk_0000.json")},
+        )
+    ]
+
+
+def test_llm_chunk_cache_read_state_requires_call_when_cache_read_disabled(tmp_path):
+    calls = []
+
+    def fake_json_load(path):
+        calls.append(path)
+        return {"status": "ok", "report": {"risk_level": "低"}}
+
+    state = paper_audit.llm_chunk_cache_read_state(
+        tmp_path,
+        chunk_idx=1,
+        total_chunks=3,
+        allow_llm_cache_read=False,
+        llm_cache_only=False,
+        json_load=fake_json_load,
+        resume_event_func=lambda *args, **kwargs: None,
+        resume_dir=tmp_path / "resume",
+    )
+
+    assert state == {
+        "status": "call_required",
+        "cache_path": tmp_path / "chunk_0001.json",
+        "report": None,
+    }
+    assert calls == []
+
+
 def test_online_cache_state_loads_resume_cache_when_enabled(tmp_path):
     resume_dir = tmp_path / ".paper_audit_resume"
     resume_dir.mkdir()
@@ -1626,6 +1723,7 @@ def test_package_boundaries_export_existing_compatibility_surface():
     assert veritas.run_logging.apply_llm_chunk_coverage_meta is paper_audit.apply_llm_chunk_coverage_meta
     assert veritas.run_logging.llm_success_cache_payload is paper_audit.llm_success_cache_payload
     assert veritas.run_logging.llm_failure_cache_payload is paper_audit.llm_failure_cache_payload
+    assert veritas.run_logging.llm_chunk_cache_read_state is paper_audit.llm_chunk_cache_read_state
     assert veritas.run_logging.online_cache_state is paper_audit.online_cache_state
     assert veritas.run_logging.save_online_cache_result is paper_audit.save_online_cache_result
     assert veritas.run_logging.image_audit_cache_state is paper_audit.image_audit_cache_state

@@ -169,6 +169,7 @@ from .run_logging import (
     image_audit_cache_state,
     image_detector_cache_save_callback,
     image_semantic_cache_save_callback,
+    llm_chunk_cache_read_state,
     llm_failure_cache_payload,
     llm_success_cache_payload,
     online_cache_state,
@@ -3314,16 +3315,23 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
 
         for chunk_text, chunk_idx, _ in chunks:
             progress_bar(chunk_idx, total_chunks, f"阶段3/5 LLM审查中：第{chunk_idx+1}/{total_chunks}块")
-            chunk_cache = llm_cache_dir / f"chunk_{chunk_idx:04d}.json"
-            cached = _json_load(chunk_cache) if allow_llm_cache_read else None
-            if cached and cached.get("status") == "ok" and cached.get("report") and not cached.get("report", {}).get("parse_error"):
+            cache_state = llm_chunk_cache_read_state(
+                llm_cache_dir,
+                chunk_idx,
+                total_chunks,
+                allow_llm_cache_read,
+                getattr(args, "llm_cache_only", False),
+                _json_load,
+                resume_event,
+                resume_dir,
+            )
+            chunk_cache = cache_state["cache_path"]
+            if cache_state["status"] == "cache_hit":
                 print(f"     ↳ 断点续作：复用第{chunk_idx+1}块成功LLM缓存")
-                resume_event(resume_dir, "stage3_llm_chunk", "cache_hit", f"chunk={chunk_idx+1}/{total_chunks}", cache=str(chunk_cache))
-                chunk_reports[chunk_idx] = cached.get("report")
-            elif getattr(args, "llm_cache_only", False):
+                chunk_reports[chunk_idx] = cache_state["report"]
+            elif cache_state["status"] == "cache_only_miss":
                 print(f"     ↳ cache-only：第{chunk_idx+1}块无成功缓存，跳过API调用")
-                failed_chunks.append((chunk_text, chunk_idx, "cache_only_no_success_cache"))
-                resume_event(resume_dir, "stage3_llm_chunk", "cache_only_miss", f"chunk={chunk_idx+1}/{total_chunks}", cache=str(chunk_cache))
+                failed_chunks.append((chunk_text, chunk_idx, cache_state["first_error"]))
             else:
                 try:
                     chunk_reports[chunk_idx] = _run_chunk_once(chunk_text, chunk_idx, retry=False)
