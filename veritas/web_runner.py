@@ -389,9 +389,13 @@ def web_runner_page_head_markup(styles=None):
 """
 
 
+def web_runner_page_script_markup(script):
+    """Wrap JavaScript content in the Web Runner script/footer markup."""
+    return "<script>\n" + str(script).strip("\n") + "\n</script>\n</body>\n</html>"
+
+
 def render_web_runner_page():
-    return web_runner_page_head_markup() + web_runner_page_body_markup() + """
-<script>
+    return web_runner_page_head_markup() + web_runner_page_body_markup() + web_runner_page_script_markup("""
 const $ = (id) => document.getElementById(id);
 let activeRunId = null;
 let logOffset = 0;
@@ -722,9 +726,7 @@ const dropZone = $('inputDropZone');
 refreshConfig();
 renderCurrentRun(null);
 refreshRuns();
-</script>
-</body>
-</html>"""
+""")
 
 
 def web_runner_cors_headers():
@@ -754,6 +756,7 @@ __all__ = [
     "web_runner_page_styles",
     "web_runner_page_body_markup",
     "web_runner_page_head_markup",
+    "web_runner_page_script_markup",
     "render_web_runner_page",
     "web_runner_cors_headers",
 ]

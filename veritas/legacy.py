@@ -391,6 +391,7 @@ from .web_runner import (
     pick_local_path,
     web_runner_page_body_markup,
     web_runner_page_head_markup,
+    web_runner_page_script_markup,
     web_runner_page_styles,
     render_web_runner_page,
     web_runner_config_status_from_namespace,
