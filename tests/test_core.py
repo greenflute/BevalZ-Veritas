@@ -3109,6 +3109,64 @@ def test_extract_images_from_mineru_zip(tmp_path):
     assert Path(images[0]).suffix == ".png"
 
 
+def test_poll_mineru_file_result_downloads_done_extract_result(monkeypatch, tmp_path):
+    calls = {}
+
+    def fake_http_request(url, method="GET", headers=None, data=None, timeout=None):
+        calls["request"] = {"url": url, "method": method, "headers": headers, "timeout": timeout}
+        payload = {
+            "code": 0,
+            "data": {
+                "extract_result": [
+                    {"state": "done", "full_zip_url": "https://mineru.example.test/result.zip"}
+                ]
+            },
+        }
+        return json.dumps(payload).encode(), 200
+
+    def fake_download_zip(zip_url, output_dir=None, source_name=None, batch_id=None):
+        calls["download"] = {
+            "zip_url": zip_url,
+            "output_dir": output_dir,
+            "source_name": source_name,
+            "batch_id": batch_id,
+        }
+        return "markdown text"
+
+    monkeypatch.setattr(paper_audit, "_http_request", fake_http_request)
+    monkeypatch.setattr(paper_audit, "_download_zip_and_extract_md", fake_download_zip)
+    file_path = tmp_path / "paper.pdf"
+    file_path.write_bytes(b"%PDF")
+
+    markdown, meta = paper_audit._poll_mineru_file_result(
+        "https://mineru.example.test/poll",
+        {"Authorization": "Bearer token"},
+        "batch-1",
+        file_path,
+        "vlm",
+        tmp_path,
+        poll_interval=0,
+        poll_timeout=1,
+    )
+
+    assert markdown == "markdown text"
+    assert calls["request"]["method"] == "GET"
+    assert calls["download"] == {
+        "zip_url": "https://mineru.example.test/result.zip",
+        "output_dir": tmp_path,
+        "source_name": "paper.pdf",
+        "batch_id": "batch-1",
+    }
+    assert meta == {
+        "source": "mineru_v4",
+        "batch_id": "batch-1",
+        "zip_url": "https://mineru.example.test/result.zip",
+        "model": "vlm",
+        "zip_saved_dir": str(tmp_path),
+        "chars": len("markdown text"),
+    }
+
+
 def test_collect_mineru_image_files_reuses_extracted_image_cache_without_zip(tmp_path):
     cache_dir = tmp_path / "_paper_audit_images"
     cache_dir.mkdir()

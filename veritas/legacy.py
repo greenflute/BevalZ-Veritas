@@ -742,6 +742,75 @@ def mineru_precision_extract_by_url(pdf_url, model_version="vlm", language="ch",
     return None, {"error": f"轮询超时({poll_timeout}s), batch_id={batch_id}"}
 
 
+def _mineru_file_batch_payload(file_path, language):
+    return json.dumps({
+        "enable_formula": True,
+        "language": language,
+        "layout_model": "doclayout_yolo",
+        "enable_table": True,
+        "files": [{"name": file_path.name, "is_ocr": True}]
+    }).encode()
+
+
+def _mineru_file_poll_task(result):
+    data = result.get("data", {}) or {}
+    extract_results = data.get("extract_result") or data.get("task_list") or []
+    task = extract_results[0] if extract_results else data
+    return data, task, task.get("state", "unknown")
+
+
+def _mineru_file_success_meta(markdown, batch_id, zip_url, model_version, output_dir):
+    return {
+        "source": "mineru_v4",
+        "batch_id": batch_id,
+        "zip_url": zip_url,
+        "model": model_version,
+        "zip_saved_dir": str(output_dir) if output_dir else str(_run_logging._RUN_OUTPUT_DIR) if _run_logging._RUN_OUTPUT_DIR else None,
+        "chars": len(markdown),
+    }
+
+
+def _poll_mineru_file_result(poll_url, auth_headers, batch_id, file_path, model_version, output_dir, poll_interval, poll_timeout):
+    start = time.time()
+    state_labels = {"processing": "处理中", "queued": "排队中", "pending": "等待中"}
+    while time.time() - start < poll_timeout:
+        try:
+            resp_data, _ = _http_request(poll_url, "GET", auth_headers, timeout=30)
+            result = json.loads(resp_data.decode())
+        except Exception as e:
+            print(f"  ⚠️ 轮询异常: {e}")
+            time.sleep(poll_interval)
+            continue
+
+        elapsed = int(time.time() - start)
+        if result.get("code") != 0:
+            print(f"  ⚠️ [{elapsed}s] 查询结果异常: code={result.get('code')} msg={result.get('msg')}")
+            time.sleep(poll_interval)
+            continue
+
+        data, task, state = _mineru_file_poll_task(result)
+        if state == "done":
+            zip_url = task.get("full_zip_url") or data.get("full_zip_url")
+            if not zip_url:
+                return None, {"error": "任务完成但未获取到下载链接", "batch_id": batch_id, "result": result}
+
+            print(f"  ✅ [{elapsed}s] 解析完成，下载Markdown...")
+            markdown = _download_zip_and_extract_md(zip_url, output_dir=output_dir, source_name=file_path.name, batch_id=batch_id)
+            if markdown:
+                return markdown, _mineru_file_success_meta(markdown, batch_id, zip_url, model_version, output_dir)
+            return None, {"error": "下载或解压zip失败", "batch_id": batch_id, "zip_url": zip_url}
+
+        elif state == "failed":
+            err = task.get("err_msg") or data.get("err_msg") or "未知错误"
+            return None, {"error": f"任务失败: {err}", "batch_id": batch_id, "result": result}
+
+        label = state_labels.get(state, state)
+        print(f"  ⏳ [{elapsed}s] {label}...")
+        time.sleep(poll_interval)
+
+    return None, {"error": f"轮询超时({poll_timeout}s), batch_id={batch_id}", "poll_url": poll_url}
+
+
 def mineru_extract_file(file_path, model_version="vlm", language="ch",
                         poll_interval=10, poll_timeout=600, output_dir=None):
     """🎯 MinerU v4 本地文件解析（需要Token，≤200MB/200页）
@@ -763,13 +832,7 @@ def mineru_extract_file(file_path, model_version="vlm", language="ch",
 
     # 1. 获取上传URL
     try:
-        batch_payload = json.dumps({
-            "enable_formula": True,
-            "language": language,
-            "layout_model": "doclayout_yolo",
-            "enable_table": True,
-            "files": [{"name": file_path.name, "is_ocr": True}]
-        }).encode()
+        batch_payload = _mineru_file_batch_payload(file_path, language)
         resp_data, _ = _http_request(
             f"{MINERU_BASE}/api/v4/file-urls/batch", "POST",
             auth_headers, batch_payload, timeout=30
@@ -802,56 +865,7 @@ def mineru_extract_file(file_path, model_version="vlm", language="ch",
     # 3. 轮询批量解析结果（file-urls/batch 上传后，用 batch_id 查询 extract-results/batch）
     # 经验验证：/api/v4/extract/task/{batch_id} 会返回 task not found，batch_id 应查批量结果接口。
     poll_url = f"{MINERU_BASE}/api/v4/extract-results/batch/{batch_id}"
-    start = time.time()
-    state_labels = {"processing": "处理中", "queued": "排队中", "pending": "等待中"}
-
-    while time.time() - start < poll_timeout:
-        try:
-            resp_data, _ = _http_request(poll_url, "GET", auth_headers, timeout=30)
-            result = json.loads(resp_data.decode())
-        except Exception as e:
-            print(f"  ⚠️ 轮询异常: {e}")
-            time.sleep(poll_interval)
-            continue
-
-        elapsed = int(time.time() - start)
-        if result.get("code") != 0:
-            print(f"  ⚠️ [{elapsed}s] 查询结果异常: code={result.get('code')} msg={result.get('msg')}")
-            time.sleep(poll_interval)
-            continue
-
-        data = result.get("data", {}) or {}
-        extract_results = data.get("extract_result") or data.get("task_list") or []
-        task = extract_results[0] if extract_results else data
-        state = task.get("state", "unknown")
-
-        if state == "done":
-            zip_url = task.get("full_zip_url") or data.get("full_zip_url")
-            if not zip_url:
-                return None, {"error": "任务完成但未获取到下载链接", "batch_id": batch_id,
-                              "result": result}
-
-            print(f"  ✅ [{elapsed}s] 解析完成，下载Markdown...")
-            markdown = _download_zip_and_extract_md(zip_url, output_dir=output_dir, source_name=file_path.name, batch_id=batch_id)
-            if markdown:
-                return markdown, {"source": "mineru_v4", "batch_id": batch_id,
-                                  "zip_url": zip_url, "model": model_version,
-                                  "zip_saved_dir": str(output_dir) if output_dir else str(_run_logging._RUN_OUTPUT_DIR) if _run_logging._RUN_OUTPUT_DIR else None,
-                                  "chars": len(markdown)}
-            return None, {"error": "下载或解压zip失败", "batch_id": batch_id,
-                          "zip_url": zip_url}
-
-        elif state == "failed":
-            err = task.get("err_msg") or data.get("err_msg") or "未知错误"
-            return None, {"error": f"任务失败: {err}", "batch_id": batch_id,
-                          "result": result}
-
-        label = state_labels.get(state, state)
-        print(f"  ⏳ [{elapsed}s] {label}...")
-        time.sleep(poll_interval)
-
-    return None, {"error": f"轮询超时({poll_timeout}s), batch_id={batch_id}",
-                  "poll_url": poll_url}
+    return _poll_mineru_file_result(poll_url, auth_headers, batch_id, file_path, model_version, output_dir, poll_interval, poll_timeout)
 
 
 def _download_zip_and_extract_md(zip_url, output_dir=None, source_name=None, batch_id=None):
