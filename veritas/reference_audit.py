@@ -14,6 +14,26 @@ def _namespace_value(namespace, name, default=None):
     return (namespace or {}).get(name, default)
 
 
+def _reference_base_issues(ref, current_year):
+    ref_issues = []
+    year = ref.get("year")
+    if not year:
+        ref_issues.append("missing_year")
+    else:
+        try:
+            if int(year) > current_year():
+                ref_issues.append("future_year")
+        except (TypeError, ValueError):
+            pass
+    if not ref.get("doi"):
+        ref_issues.append("missing_doi")
+    if not ref.get("has_journal_hint"):
+        ref_issues.append("missing_journal_or_source")
+    if len(ref.get("text", "")) < 25:
+        ref_issues.append("too_short")
+    return ref_issues
+
+
 def audit_references_from_namespace(namespace, references_text, online=False, online_limit=50, timeout=10, cache=None):
     """Reference plausibility check with optional online scholarly database verification."""
     parse = _namespace_value(namespace, "parse_references", parse_references)
@@ -28,25 +48,6 @@ def audit_references_from_namespace(namespace, references_text, online=False, on
     effective_online_limit = effective_limit(online_limit, len(refs))
     online_checked = 0
     online_cache = cache if isinstance(cache, dict) else {}
-
-    def base_issues_for(ref):
-        ref_issues = []
-        year = ref.get("year")
-        if not year:
-            ref_issues.append("missing_year")
-        else:
-            try:
-                if int(year) > current_year():
-                    ref_issues.append("future_year")
-            except (TypeError, ValueError):
-                pass
-        if not ref.get("doi"):
-            ref_issues.append("missing_doi")
-        if not ref.get("has_journal_hint"):
-            ref_issues.append("missing_journal_or_source")
-        if len(ref.get("text", "")) < 25:
-            ref_issues.append("too_short")
-        return ref_issues
 
     if online:
         fetch_jobs = []
@@ -98,7 +99,7 @@ def audit_references_from_namespace(namespace, references_text, online=False, on
 
     issues = []
     for idx, ref in enumerate(refs, 1):
-        ref_issues = base_issues_for(ref)
+        ref_issues = _reference_base_issues(ref, current_year)
 
         if online and idx <= effective_online_limit:
             cache_key = cache_key_for(ref)

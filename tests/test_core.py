@@ -2634,6 +2634,19 @@ def test_audit_references_reports_basic_verifiability_issues():
     assert audit["issues"][0]["index"] == 2
 
 
+def test_reference_base_issues_uses_runtime_year_and_required_fields():
+    issues = veritas.reference_audit._reference_base_issues(
+        {"year": "2028", "doi": "", "has_journal_hint": False, "text": "Short"},
+        lambda: 2026,
+    )
+
+    assert issues == ["future_year", "missing_doi", "missing_journal_or_source", "too_short"]
+    assert veritas.reference_audit._reference_base_issues(
+        {"year": "2024", "doi": "10.1000/abc", "has_journal_hint": True, "text": "A sufficiently long reference text."},
+        lambda: 2026,
+    ) == []
+
+
 def test_parse_references_strips_mineru_markup():
     refs = """[[EXTRACTION_NOTE]] noise [[/EXTRACTION_NOTE]]
 [[BLOCK type=text page=1]]
