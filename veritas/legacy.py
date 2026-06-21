@@ -2763,6 +2763,54 @@ def _handle_run_report_opening(args, html_output_path, report_actions_port, run_
         print(f"⚠️ 自动打开浏览器失败: {e}，请手动打开: {html_output_path}")
 
 
+def _run_reference_resource_audits(full_text, meta, args, resume_dir):
+    audit_text, references_text = split_audit_and_reference_text(full_text, meta)
+    reference_online_cache_state = online_cache_state(resume_dir, "reference_online_cache.json", args.no_resume, _json_load)
+    reference_online_cache = reference_online_cache_state["cache"]
+    reference_online_enabled = bool(references_text) and not args.no_reference_online
+    if reference_online_enabled:
+        print(f"🔎 参考文献在线检索已启用: 上限{args.reference_online_limit}条, 超时{args.reference_timeout}s")
+    reference_audit = audit_references(
+        references_text,
+        online=reference_online_enabled,
+        online_limit=args.reference_online_limit,
+        timeout=args.reference_timeout,
+        cache=reference_online_cache,
+    )
+    if reference_online_enabled:
+        save_online_cache_result(reference_online_cache_state, reference_audit, "stage1_reference_online", "online_checked", _json_save, resume_event, resume_dir)
+    if references_text:
+        meta["references_excluded_from_main_audit"] = True
+        meta["reference_chars"] = len(references_text)
+        meta["reference_count"] = reference_audit.get("reference_count", 0)
+        meta["reference_audit"] = reference_audit
+        print(f"📚 已从主体审查中剥离参考文献: {meta['reference_count']}条, {len(references_text)}字符；将单独校检")
+        resume_event(resume_dir, "stage1_references", "done", f"refs={meta['reference_count']}; chars={len(references_text)}")
+    else:
+        meta["references_excluded_from_main_audit"] = False
+        meta["reference_audit"] = reference_audit
+        print("📚 未识别到独立参考文献章节，主体审查不做引用剥离")
+
+    resource_online_cache_state = online_cache_state(resume_dir, "resource_online_cache.json", args.no_resume, _json_load)
+    resource_online_cache = resource_online_cache_state["cache"]
+    resource_online_enabled = not getattr(args, "no_resource_online", False)
+    resource_audit = audit_resources(
+        full_text,
+        online=resource_online_enabled,
+        timeout=getattr(args, "resource_timeout", 10),
+        cache=resource_online_cache,
+    )
+    if resource_online_enabled:
+        save_online_cache_result(resource_online_cache_state, resource_audit, "stage1_resource_online", "online_checked", _json_save, resume_event, resume_dir)
+    meta["resource_count"] = resource_audit.get("resource_count", 0)
+    meta["resource_audit"] = resource_audit
+    if resource_audit.get("resource_count"):
+        print(f"🔗 已识别代码仓库/在线资源: {resource_audit.get('resource_count')}项；在线检测{resource_audit.get('online_checked', 0)}项")
+    else:
+        print("🔗 未识别到代码仓库或论文部署的在线资源链接")
+    return audit_text, reference_audit, resource_audit
+
+
 
 def run_audit(run_request: RunRequest, args=None) -> RunResult:
     args = args if args is not None else run_request.to_args()
@@ -3232,53 +3280,8 @@ def run_audit(run_request: RunRequest, args=None) -> RunResult:
         print("ℹ️ --image-detect 已改为兼容参数；图片检测将在阶段4自动调用图像语义分析与imagedetector子工具，不会打开网页或要求手动上传。")
 
     # ─── 参考文献剥离与单独校检 ───
-    audit_text, references_text = split_audit_and_reference_text(full_text, meta)
-    reference_online_cache_state = online_cache_state(resume_dir, "reference_online_cache.json", args.no_resume, _json_load)
-    reference_online_cache_path = reference_online_cache_state["path"]
-    reference_online_enabled = bool(references_text) and not args.no_reference_online
-    reference_online_cache = reference_online_cache_state["cache"]
-    if reference_online_enabled:
-        print(f"🔎 参考文献在线检索已启用: 上限{args.reference_online_limit}条, 超时{args.reference_timeout}s")
-    reference_audit = audit_references(
-        references_text,
-        online=reference_online_enabled,
-        online_limit=args.reference_online_limit,
-        timeout=args.reference_timeout,
-        cache=reference_online_cache,
-    )
-    if reference_online_enabled:
-        save_online_cache_result(reference_online_cache_state, reference_audit, "stage1_reference_online", "online_checked", _json_save, resume_event, resume_dir)
-    if references_text:
-        meta["references_excluded_from_main_audit"] = True
-        meta["reference_chars"] = len(references_text)
-        meta["reference_count"] = reference_audit.get("reference_count", 0)
-        meta["reference_audit"] = reference_audit
-        print(f"📚 已从主体审查中剥离参考文献: {meta['reference_count']}条, {len(references_text)}字符；将单独校检")
-        resume_event(resume_dir, "stage1_references", "done", f"refs={meta['reference_count']}; chars={len(references_text)}")
-    else:
-        meta["references_excluded_from_main_audit"] = False
-        meta["reference_audit"] = reference_audit
-        print("📚 未识别到独立参考文献章节，主体审查不做引用剥离")
+    audit_text, reference_audit, resource_audit = _run_reference_resource_audits(full_text, meta, args, resume_dir)
     completed_stages.append("stage1_reference_audit")
-
-    # ─── 代码仓库与在线部署资源可用性校检 ───
-    resource_online_cache_state = online_cache_state(resume_dir, "resource_online_cache.json", args.no_resume, _json_load)
-    resource_online_cache = resource_online_cache_state["cache"]
-    resource_online_enabled = not getattr(args, "no_resource_online", False)
-    resource_audit = audit_resources(
-        full_text,
-        online=resource_online_enabled,
-        timeout=getattr(args, "resource_timeout", 10),
-        cache=resource_online_cache,
-    )
-    if resource_online_enabled:
-        save_online_cache_result(resource_online_cache_state, resource_audit, "stage1_resource_online", "online_checked", _json_save, resume_event, resume_dir)
-    meta["resource_count"] = resource_audit.get("resource_count", 0)
-    meta["resource_audit"] = resource_audit
-    if resource_audit.get("resource_count"):
-        print(f"🔗 已识别代码仓库/在线资源: {resource_audit.get('resource_count')}项；在线检测{resource_audit.get('online_checked', 0)}项")
-    else:
-        print("🔗 未识别到代码仓库或论文部署的在线资源链接")
     completed_stages.append("stage1_resource_audit")
 
     # ─── 阶段2：本地统计检测（使用全文，统计不截断） ───
