@@ -2662,6 +2662,25 @@ def test_reference_online_skipped_result_contains_limit_problem_and_query():
     }
 
 
+def test_reference_online_error_result_contains_error_class_and_message():
+    result = veritas.reference_audit._reference_online_error_result(
+        {"title": "A reference"},
+        RuntimeError("source exploded"),
+        lambda ref: {"title": ref["title"]},
+        lambda text, limit: text[:limit],
+    )
+
+    assert result == {
+        "online_status": "error",
+        "confidence": 0.0,
+        "query": {"title": "A reference"},
+        "matched_sources": [],
+        "problems": ["all_sources_error"],
+        "source_errors": ["verify_reference_online: RuntimeError"],
+        "error_message": "source exploded",
+    }
+
+
 def test_parse_references_strips_mineru_markup():
     refs = """[[EXTRACTION_NOTE]] noise [[/EXTRACTION_NOTE]]
 [[BLOCK type=text page=1]]

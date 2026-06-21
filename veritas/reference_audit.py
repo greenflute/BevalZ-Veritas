@@ -44,6 +44,18 @@ def _reference_online_skipped_result(ref, query_for):
     }
 
 
+def _reference_online_error_result(ref, error, query_for, brief_text):
+    return {
+        "online_status": "error",
+        "confidence": 0.0,
+        "query": query_for(ref),
+        "matched_sources": [],
+        "problems": ["all_sources_error"],
+        "source_errors": [f"verify_reference_online: {type(error).__name__}"],
+        "error_message": brief_text(str(error), 240),
+    }
+
+
 def audit_references_from_namespace(namespace, references_text, online=False, online_limit=50, timeout=10, cache=None):
     """Reference plausibility check with optional online scholarly database verification."""
     parse = _namespace_value(namespace, "parse_references", parse_references)
@@ -84,15 +96,7 @@ def audit_references_from_namespace(namespace, references_text, online=False, on
                     try:
                         online_result = future.result()
                     except Exception as e:
-                        online_result = {
-                            "online_status": "error",
-                            "confidence": 0.0,
-                            "query": query_for(ref),
-                            "matched_sources": [],
-                            "problems": ["all_sources_error"],
-                            "source_errors": [f"verify_reference_online: {type(e).__name__}"],
-                            "error_message": brief_text(str(e), 240),
-                        }
+                        online_result = _reference_online_error_result(ref, e, query_for, brief_text)
                     online_cache[cache_key] = online_result
                     ref["online"] = online_result
 
