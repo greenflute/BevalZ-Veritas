@@ -104,6 +104,10 @@ tests/
   does not import `veritas.legacy`.
 - Renderer-facing code should accept stable dataclass models or dictionaries and
   normalize at the renderer boundary.
+- Run orchestration state that crosses multiple helper calls should use stable
+  dataclasses in `veritas/run_types.py` instead of ad-hoc dictionaries with
+  string keys. This keeps the orchestration seam explicit and makes missing
+  fields fail early.
 - Avoid adding new orchestration logic directly to `paper_audit.py`.
 
 ---
@@ -121,6 +125,10 @@ tests/
 
 - `paper_audit.py` aliases `veritas.legacy` for historical `import paper_audit`
   compatibility while still running `veritas.legacy.main()` as a script.
+- `veritas/run_types.py` owns `RunRequest`, `RunAuditContext`, and `RunResult`.
+  `RunAuditContext` is the prepared runtime context for one audit orchestration
+  run; helpers may produce it, while `veritas.legacy.run_audit` consumes its
+  attributes rather than dictionary keys.
 - `veritas/models.py` owns `AuditFailure`, `AuditReportModel`,
   `EvidenceFinding`, and related lightweight dataclasses; `paper_audit` keeps
   compatibility by re-exporting the same class objects through `veritas.legacy`.
